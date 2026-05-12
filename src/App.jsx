@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import ExcelJS from 'exceljs'
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate'
 import './App.css'
@@ -120,6 +120,100 @@ function getAttr(xmlStr, attr) {
   const m = xmlStr.match(new RegExp(`${attr}="([^"]+)"`))
   return m ? m[1] : null
 }
+
+/** Mapeo de Element Type (columna D de All Entitlements) al código de concepto (columna D de Novedades) */
+const ELEMENT_TYPE_CODE_MAP = new Map([
+  ['CO Salaries integrated',                '001050'],
+  ['Salary',                                '001050'],
+  ['CO Support and maintenance',            '001050'],
+  ['Overtime 125%',                         '001061'],
+  ['Overtime 175%',                         '001062'],
+  ['Overtime 200%',                         '001063'],
+  ['Overtime 250%',                         '001064'],
+  ['Overtime 35%',                          '001060'],
+  ['Overtime 25%',                          '111502'],
+  ['Overtime 75%',                          '111503'],
+  ['Overtime 100%',                         '001067'],
+  ['Overtime Difference Ajust',             '100030'],
+  ['Overtime 100% Overpaid',                '200036'],
+  ['Holiday',                               '001092'],
+  ['Bravo',                                 '100011'],
+  ['SIP Payout',                            '100014'],
+  ['Overnight',                             '100015'],
+  ['Stock Options',                         '110024'],
+  ['Advanced Stock Options',               '200024'],
+  ['RSU Dividend',                          '100023'],
+  ['AEIP Bonus',                            '100007'],
+  ['Transactional Bonus',                   '100012'],
+  ['Referral Bonus',                        '100018'],
+  ['Lump Sum Merit',                        '100013'],
+  ['Retention Bonus',                       '100019'],
+  ['Sign-On Bonus',                         '100020'],
+  ['EBP \u2013 Sensia',                     '100022'],
+  ['LATAM Misc Award',                      '100016'],
+  ['CO Grossup',                            '100010'],
+  ['Relocation Allowance',                  '100001'],
+  ['CO Lease Assistance',                   '100002'],
+  ['Car Displacement Allowance',            '100004'],
+  ['Retroactive Connectivity Benefit',      '100005'],
+  ['Libranza Retroactive',                  '100026'],
+  ['BANK FEE RETENTION RETURN',             '100006'],
+  ['BANK FEE COMISSION',                    '201301'],
+  ['Garnishment Return',                    '100009'],
+  ['CO Mayor Discounted Value Ret',         '100008'],
+  ['Discount Bravo',                        '200016'],
+  ['Gross Up Refund',                       '200017'],
+  ['Salary Overpaid',                       '200035'],
+  ['CO Salary Advance Discount',            '200020'],
+  ['Meal Voucher Deduction',                '200011'],
+  ['CO Voluntary Tyba',                     '200025'],
+  ['AFC Bancoomeva',                        '200008'],
+  ['CO Pension contribution Sub Pay',       '102215'],
+  ['CO Pension contribution Soli Ded',      '002215'],
+  ['CO Pencion Solid-Subsistencia',         '002218'],
+  ['CO Severance Definitive',               '001600'],
+  ['CO Severance Premium Legal',            '001500'],
+  ['CO Severance Act',                      '001530'],
+  ['CO Severance Interest Payment',         '001565'],
+  ['CO Tax withheld Fuente IMAN',           '003300'],
+  ['CO Contribution AFC Colpatria',         '200000'],
+  ['CO Contribution AFC Itau',              '200001'],
+  ['CO Contribution AFC Occidente',         '200002'],
+  ['CO Contribution AFC Davivienda',        '200003'],
+  ['CO Contribution AFC Av Villas',         '200004'],
+  ['CO Contribution AFC Bogota',            '200005'],
+  ['CO Contributions AFC Bancolombia',      '200006'],
+  ['CO Contribution AFC BBVA',              '200007'],
+  ['CO Contri AFC Banco Caja Social',       '200009'],
+  ['CO Contribution AFC FNA',               '200010'],
+  ['Housing Assistance',                    '100000'],
+  ['CO Medical Reimburstment',              '100003'],
+  ['Connectivity Benefit',                  '101500'],
+  ['Food Vouchers Payment',                 '111501'],
+  ['Vales alimentacion no gravados',        '111500'],
+  ['Transportation Allowance',              '101300'],
+  ['Libranza Retention',                    '200012'],
+  ['Dental Plan',                           '200018'],
+  ['Food Vouchers Deduction',               '200205'],
+  ['CO GTO NAL Reimburstment',              '200500'],
+  ['Media Medicina Prepagada',              '003200'],
+  ['Descuento Anticipo no',                 '200019'],
+  ['Retencion Fuente Voluntario',           '203300'],
+  ['Bonos de Alimentaci\u00f3n Gravados',   '003321'],
+  ['Bonos Alimentaci\u00f3n Gravados excede 41 UVT', '003348'],
+  ['CO Voluntary Proteccion',               '200510'],
+  ['CO Voluntary Skandia',                  '200511'],
+  ['CO Voluntary Colfondos',               '200512'],
+  ['CO Voluntary Porvenir',                '200513'],
+  ['Skandia Patrimonio',                    '200611'],
+  ['Vacation',                              '001130'],
+  ['Paternity Leave',                       '001153'],
+  ['Sick Leave',                            '001150'],
+  ['Licencia de duelo',                     '100032'],
+  ['Vacation Indemnity',                    '001145'],
+  ['Transportation Assistance',             '101300'],
+  ['BANK FEE RETENTION',                    '003410'],
+])
 
 /** Resuelve el path ZIP de la hoja dado su nombre */
 function resolveSheetZipPath(workbookXml, relsXml, sheetName) {
@@ -480,7 +574,7 @@ function buildDetalladoRow(r, empleado, nombre, concepto, descConcepto, cantidad
   return `<row r="${r}" spans="1:16" ht="15" customHeight="1" x14ac:dyDescent="0.3">${c}</row>`
 }
 
-function buildRevIncapRow(r, empleado, nombre, concepto, descConcepto, cantidad, devengos, deducciones, strIdxMap) {
+function buildRevIncapRow(r, empleado, nombre, concepto, descConcepto, cantidad, devengos, deducciones, strIdxMap, kRef = '$C$4', cantidadOverride = null, pct = '70%') {
   const getIdx = (v) => {
     const s = (v == null ? '' : String(v)).trim()
     if (!s) return null
@@ -500,12 +594,12 @@ function buildRevIncapRow(r, empleado, nombre, concepto, descConcepto, cantidad,
   const cIdx = getIdx(nombre);       if (cIdx !== null) c += `<c r="C${r}" t="s"><v>${cIdx}</v></c>`
   const dIdx = getIdx(concepto);     if (dIdx !== null) c += `<c r="D${r}" t="s"><v>${dIdx}</v></c>`
   const eIdx = getIdx(descConcepto); if (eIdx !== null) c += `<c r="E${r}" t="s"><v>${eIdx}</v></c>`
-  const cant = Number(cantidad ?? 0);    c += `<c r="F${r}"><v>${isNaN(cant) ? 0 : cant}</v></c>`
+  const cant = Number(cantidadOverride ?? cantidad ?? 0); c += `<c r="F${r}"><v>${isNaN(cant) ? 0 : cant}</v></c>`
   const dev  = Number(devengos ?? 0);    c += `<c r="G${r}"><v>${isNaN(dev)  ? 0 : dev}</v></c>`
   const ded  = Number(deducciones ?? 0); c += `<c r="H${r}"><v>${isNaN(ded)  ? 0 : ded}</v></c>`
   c += `<c r="I${r}"><f>+VLOOKUP(B${r},'Maestro Personal'!$B$2:$E$312,4,0)</f></c>`
   c += `<c r="J${r}"><f>+VLOOKUP(I${r},'Planilla Mes anterior'!$CX:$CY,2,0)*100/70</f></c>`
-  c += `<c r="K${r}"><f>+ROUND(J${r}/30*70%*F${r}*$C$4,0)</f></c>`
+  c += `<c r="K${r}"><f>+ROUND(J${r}/30*${pct}*F${r}*${kRef},0)</f></c>`
   c += `<c r="L${r}"><f>+K${r}-G${r}</f></c>`
   c += `<c r="M${r}" t="str"><f>+VLOOKUP(A${r},'Validacion novedades'!$A$5:$G$3497,7,0)</f></c>`
   c += `<c r="N${r}"><f>+M${r}-G${r}</f></c>`
@@ -533,69 +627,190 @@ function overwritePivotInSheet(sheetXml, pivotCellMap) {
   })
 }
 
-// ─── Actualiza col A de "Seguridad Social" con códigos de empleados ─────────
-/**
- * Sobrescribe la columna A en la hoja "Seguridad Social" con los códigos de
- * empleados del Maestro Personal.
- *   · Filas 3-361: reemplaza col A (conserva todas las fórmulas/estilos intactos)
- *   · Si hay menos empleados que filas disponibles: las filas sobrantes quedan sin col A
- *   · Si hay más de 359 empleados: genera filas 362+ a partir de la plantilla de fila 3
- *     con fórmulas explícitas y número de fila actualizado
- */
-function patchSegSocialColA(sheetXml, empleadoCodes) {
-  const FIRST_ROW = 3
-  const LAST_TPL_ROW = 361
-  const total = empleadoCodes.length
+// ─── Construye una fila XML para la hoja "Validacion novedades" ─────────────
+function buildValNovedadesRow(r, empleado, nombre, concepto, descConcepto, cantidad, devengos, deducciones, strIdxMap) {
+  const getIdx = (v) => {
+    const s = (v == null ? '' : String(v)).trim()
+    if (!s) return null
+    const idx = strIdxMap.get(s)
+    return idx !== undefined ? idx : null
+  }
+  const empTrimmed = (empleado == null ? '' : String(empleado)).trim()
+  const empIsNum = empTrimmed !== '' && /^\d+$/.test(empTrimmed)
+  let c = ''
+  // Col A: clave concatenada (fórmula), cols B-H: datos, cols I/J/K/L/N: fórmulas
+  c += `<c r="A${r}" s="1" t="str"><f>+CONCATENATE(B${r},D${r})</f></c>`
+  if (empIsNum) {
+    c += `<c r="B${r}" s="84"><v>${empTrimmed}</v></c>`
+  } else {
+    const idx = getIdx(empTrimmed)
+    if (idx !== null) c += `<c r="B${r}" s="84" t="s"><v>${idx}</v></c>`
+  }
+  const cIdx = getIdx(nombre);       if (cIdx !== null) c += `<c r="C${r}" s="84" t="s"><v>${cIdx}</v></c>`
+  const dIdx = getIdx(concepto);     if (dIdx !== null) c += `<c r="D${r}" s="84" t="s"><v>${dIdx}</v></c>`
+  const eIdx = getIdx(descConcepto); if (eIdx !== null) c += `<c r="E${r}" s="84" t="s"><v>${eIdx}</v></c>`
+  const cant = Number(cantidad ?? 0);    c += `<c r="F${r}" s="85"><v>${isNaN(cant) ? 0 : cant}</v></c>`
+  const dev  = Number(devengos ?? 0);    c += `<c r="G${r}" s="85"><v>${isNaN(dev)  ? 0 : dev}</v></c>`
+  const ded  = Number(deducciones ?? 0); c += `<c r="H${r}" s="85"><v>${isNaN(ded)  ? 0 : ded}</v></c>`
+  c += `<c r="I${r}" s="85"><f>+G${r}-H${r}</f></c>`
+  const concTrimmed = (concepto == null ? '' : String(concepto)).trim()
+  if (concTrimmed === '001150') {
+    c += `<c r="J${r}" s="88"><f>+F${r}</f></c>`
+  } else if (concTrimmed === '100015') {
+    c += `<c r="J${r}" s="88"><f>+I${r}</f></c>`
+  } else {
+    c += `<c r="J${r}" s="88"><f>IF(K${r}&lt;&gt;0,K${r},"")</f></c>`
+  }
+  c += `<c r="K${r}" s="45"><f>IFERROR(VLOOKUP(A${r},Novedades!$H:$I,2,0),0)</f></c>`
+  c += `<c r="L${r}" s="46"><f>IFERROR(J${r}-K${r},0)</f></c>`
+  c += `<c r="N${r}" s="22"><f>VLOOKUP(B${r},'Maestro Personal'!$B$2:$AA$377,26,0)</f></c>`
+  return `<row r="${r}" spans="1:14" ht="12.9" customHeight="1" x14ac:dyDescent="0.3">${c}</row>`
+}
 
-  // ── Paso 1: parchear filas 3-361 (reemplazar/quitar col A) ──────────────────
+// ─── Actualiza los parámetros configurables en la hoja "Parametros" ─────────
+function patchParametrosSheet(sheetXml, params) {
+  const patchCellV = (xml, cellRef, newVal) =>
+    xml.replace(
+      new RegExp(`(<c r="${cellRef}"[^>]*(?<!\\/)>)[\\s\\S]*?(<\\/c>)`),
+      (_, open, close) => `${open}<v>${newVal}</v>${close}`
+    )
+  let xml = sheetXml
+  xml = patchCellV(xml, 'D13', Math.round(params.uvt))
+  for (let i = 0; i < 6; i++) {
+    const r = 23 + i
+    xml = patchCellV(xml, `B${r}`, Math.round(params.ret[i].desde))
+    xml = patchCellV(xml, `C${r}`, params.ret[i].tarifa)
+    xml = patchCellV(xml, `D${r}`, Math.round(params.ret[i].descuento))
+    xml = patchCellV(xml, `F${r}`, Math.round(params.sol[i].rango))
+    xml = patchCellV(xml, `H${r}`, params.sol[i].tarifa)
+  }
+  return xml
+}
+
+/**
+ * Lee los registros de la hoja "rete adic" (filas 2+, col A/B/C).
+ * Devuelve array de { empleado, nombre, retAdicional }
+ */
+function parseReteAdicSheet(sheetXml, ssArr) {
+  const rows = []
+  const cellRe = /<c r="([A-Z]{1,3})(\d+)"([^>]*)(?<!\/)>([\s\S]*?)<\/c>/g
+  const byRow = {}
+  let m
+  while ((m = cellRe.exec(sheetXml)) !== null) {
+    const col = m[1], rowNum = parseInt(m[2]), attrs = m[3], inner = m[4]
+    if (rowNum < 2) continue  // omitir fila de encabezados
+    if (!byRow[rowNum]) byRow[rowNum] = {}
+    const vM = inner.match(/<v>([^<]*)<\/v>/)
+    if (!vM) continue
+    const isStr = attrs.includes('t="s"')
+    const val = isStr ? (ssArr[parseInt(vM[1])] ?? '') : parseFloat(vM[1])
+    byRow[rowNum][col] = val
+  }
+  for (const rn of Object.keys(byRow).sort((a, b) => a - b)) {
+    const r = byRow[rn]
+    if (r.A === undefined && r.B === undefined) continue
+    rows.push({
+      empleado:     r.A ?? '',
+      nombre:       r.B ?? '',
+      retAdicional: r.C ?? 0,
+    })
+  }
+  return rows
+}
+
+/**
+ * Reconstruye la hoja "rete adic" completa con los registros dados.
+ * Preserva la fila 1 (encabezados) y reemplaza todo el sheetData.
+ * Estilos tomados del template: s="121" A/B, s="122" C
+ */
+function buildReteAdicSheet(sheetXml, records, ssForwardMap) {
+  // Construir nueva sheetData
+  const headerRow = sheetXml.match(/<row r="1"[\s\S]*?<\/row>/)
+  const header = headerRow ? headerRow[0] : ''
+
+  const dataRows = records.map((rec, i) => {
+    const r = i + 2
+    const empVal = typeof rec.empleado === 'number' || /^\d+$/.test(String(rec.empleado).trim())
+      ? `<c r="A${r}" s="121"><v>${rec.empleado}</v></c>`
+      : (() => {
+          const idx = ssForwardMap.get(String(rec.empleado))
+          return idx !== undefined ? `<c r="A${r}" s="121" t="s"><v>${idx}</v></c>` : ''
+        })()
+    const nomIdx = ssForwardMap.get(String(rec.nombre))
+    const nomCell = nomIdx !== undefined ? `<c r="B${r}" s="121" t="s"><v>${nomIdx}</v></c>` : ''
+    const retVal = Number(rec.retAdicional) || 0
+    const retCell = `<c r="C${r}" s="122"><v>${retVal}</v></c>`
+    return `<row r="${r}" spans="1:3" x14ac:dyDescent="0.3">${empVal}${nomCell}${retCell}</row>`
+  })
+
+  const lastRow = records.length + 1
+  const allRows = [header, ...dataRows].join('')
+  const newDim = `<dimension ref="A1:C${lastRow}"/>`
+
+  return sheetXml
+    .replace(/<dimension ref="[^"]*"\/>/,  newDim)
+    .replace(/<sheetData>[\s\S]*?<\/sheetData>/, `<sheetData>${allRows}</sheetData>`)
+}
+
+// ─── Función genérica: sobrescribe col A con códigos de empleados ────────────
+/**
+ * Reemplaza la columna A de cualquier hoja con los códigos de empleados.
+ *   · Filas firstRow..lastTplRow: reemplaza/elimina col A existente
+ *   · Si hay más empleados que huecos: genera filas extra clonando firstRow
+ *     con fórmulas re-numeradas y col A con el código correspondiente
+ */
+function patchSheetColA(sheetXml, empleadoCodes, firstRow, lastTplRow, aStyle) {
+  const total = empleadoCodes.length
+  const tplRowStr = String(firstRow)
+
+  // ── Paso 1: parchear filas firstRow..lastTplRow ───────────────────────────
   let result = sheetXml.replace(/<row r="(\d+)"([^>]*)(?<!\/)>([\s\S]*?)<\/row>/g,
     (match, rStr, attrs, inner) => {
       const r = parseInt(rStr)
-      if (r < FIRST_ROW || r > LAST_TPL_ROW) return match
+      if (r < firstRow || r > lastTplRow) return match
 
-      // Eliminar celda A existente (tanto normal como self-closing)
       let newInner = inner
         .replace(/<c r="A\d+"([^>]*)(?<!\/)>([\s\S]*?)<\/c>/g, '')
         .replace(/<c r="A\d+"[^>]*\/>/g, '')
 
-      const idx = r - FIRST_ROW
+      const idx = r - firstRow
       if (idx < total && empleadoCodes[idx]) {
-        newInner = `<c r="A${r}" s="81"><v>${empleadoCodes[idx]}</v></c>` + newInner
+        newInner = `<c r="A${r}" s="${aStyle}"><v>${empleadoCodes[idx]}</v></c>` + newInner
       }
       return `<row r="${r}"${attrs}>${newInner}</row>`
     })
 
-  // ── Paso 2: añadir filas 362+ si hay más empleados que huecos de plantilla ─
-  const TPL_SLOTS = LAST_TPL_ROW - FIRST_ROW + 1   // 359
+  // ── Paso 2: añadir filas extra si hay más empleados que huecos ───────────
+  const TPL_SLOTS = lastTplRow - firstRow + 1
   if (total > TPL_SLOTS) {
-    const row3M = sheetXml.match(/<row r="3"([^>]*)(?<!\/)>([\s\S]*?)<\/row>/)
-    if (row3M) {
-      const row3Attrs = row3M[1]
-      const row3Inner = row3M[2]
+    const rowTplRe = new RegExp(`<row r="${tplRowStr}"([^>]*)(?<!\\/)>([\\s\\S]*?)<\\/row>`)
+    const rowTplM = sheetXml.match(rowTplRe)
+    if (rowTplM) {
+      const rowAttrs = rowTplM[1]
+      const rowInner = rowTplM[2]
       const newRows = []
 
       for (let idx = TPL_SLOTS; idx < total; idx++) {
-        const r = FIRST_ROW + idx
+        const r = firstRow + idx
         const code = empleadoCodes[idx]
         if (!code) continue
 
-        let inner = row3Inner
-          // a) Renumerar atributos de ref de celda: r="X3" → r="X{r}"
-          .replace(/r="([A-Z]{1,3})3"/g, (_, col) => `r="${col}${r}"`)
-          // b) Quitar atributos de shared-formula en <f>, conservar texto de fórmula
+        let inner = rowInner
+          // a) Renumerar refs de celda: r="X{firstRow}" → r="X{r}"
+          .replace(new RegExp(`r="([A-Z]{1,3})${tplRowStr}"`, 'g'), (_, col) => `r="${col}${r}"`)
+          // b) Quitar atributos de shared-formula, conservar texto
           .replace(/<f ([^>]+)>([\s\S]*?)<\/f>/g, '<f>$2</f>')
-          // c) Renumerar referencias de fila relativas en el texto de fórmulas
-          //    Solo coincide con letra(s) seguidas de "3" no precedida de "$" ni seguida de dígito
-          .replace(/(?<!\$)([A-Z]{1,3})3(?!\d)/g, (_, col) => `${col}${r}`)
-          // d) Eliminar valores cacheados de celdas con fórmula (Excel recalculará)
+          // c) Renumerar referencias de fila relativas en fórmulas
+          .replace(new RegExp(`(?<!\\$)([A-Z]{1,3})${tplRowStr}(?!\\d)`, 'g'), (_, col) => `${col}${r}`)
+          // d) Eliminar valores cacheados en celdas con fórmula
           .replace(/(<f>[\s\S]*?<\/f>)\s*<v>[^<]*<\/v>/g, '$1')
-          // e) Reemplazar col A con el nuevo código de empleado
+          // e) Reemplazar col A con el nuevo código
           .replace(/<c r="A[^"]*"([^>]*)(?<!\/)>([\s\S]*?)<\/c>/,
-            `<c r="A${r}" s="81"><v>${code}</v></c>`)
+            `<c r="A${r}" s="${aStyle}"><v>${code}</v></c>`)
           .replace(/<c r="A[^"]*"[^>]*\/>/,
-            `<c r="A${r}" s="81"><v>${code}</v></c>`)
+            `<c r="A${r}" s="${aStyle}"><v>${code}</v></c>`)
 
-        newRows.push(`<row r="${r}"${row3Attrs}>${inner}</row>`)
+        newRows.push(`<row r="${r}"${rowAttrs}>${inner}</row>`)
       }
 
       result = result.replace('</sheetData>', newRows.join('') + '</sheetData>')
@@ -603,6 +818,12 @@ function patchSegSocialColA(sheetXml, empleadoCodes) {
   }
 
   return result
+}
+
+// ─── Actualiza col A de "Seguridad Social" con códigos de empleados ─────────
+/** Wrapper de patchSheetColA para "Seguridad Social" (filas 3-361, s="81") */
+function patchSegSocialColA(sheetXml, empleadoCodes) {
+  return patchSheetColA(sheetXml, empleadoCodes, 3, 361, '81')
 }
 
 // ─── Extrae hoja "Seguridad Social" como workbook independiente ──────────────
@@ -844,56 +1065,123 @@ function replaceFormulasWithValues(sheetXml, evalMap, ssMap) {
 }
 
 /**
- * Produce el XLSX standalone de "Seguridad Social":
- * - Carga todas las hojas dependientes en HyperFormula
- * - Evalúa las fórmulas de sheet19 con los datos reales (Detallado Mes, etc.)
- * - Genera un XLSX mínimo con SOLO la hoja "Seguridad Social" y valores estáticos
+ * Agrega a styles.xml: fuente Calibri 9 + fills para cada color único + xf entries.
+ * Devuelve { updatedStylesXml, styleIdxMap: Map<argbString, xfIndex> }
+ * La clave '' en styleIdxMap corresponde a xf con Calibri 9 sin relleno.
  */
-async function extractSegSocial(files, workbookXml, relsXml) {
+function addStylesForBvac(stylesXml, fillArgbs) {
+  let xml = stylesXml
+
+  // 1. Añadir fuente Calibri 9
+  const fontCountMatch = xml.match(/<fonts count="(\d+)"/)
+  const fontCount = fontCountMatch ? parseInt(fontCountMatch[1]) : 0
+  const calibri9Idx = fontCount
+  const calibri9Xml = '<font><sz val="9"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
+  xml = xml.replace(/<\/fonts>/, calibri9Xml + '</fonts>')
+  xml = xml.replace(/<fonts count="\d+"/, `<fonts count="${fontCount + 1}"`)
+
+  // 2. Añadir numFmt personalizado DD/MM/YYYY
+  const usedNumFmtIds = [...xml.matchAll(/numFmtId="(\d+)"/g)].map(m => parseInt(m[1]))
+  const dateNumFmtId = Math.max(163, ...usedNumFmtIds) + 1
+  const numFmtXml = `<numFmt numFmtId="${dateNumFmtId}" formatCode="DD/MM/YYYY"/>`
+  if (xml.includes('<numFmts')) {
+    xml = xml.replace(/<\/numFmts>/, numFmtXml + '</numFmts>')
+    xml = xml.replace(/<numFmts count="(\d+)"/, (m, n) => `<numFmts count="${parseInt(n) + 1}"`)
+  } else {
+    xml = xml.replace(/(<styleSheet[^>]*>)/, `$1<numFmts count="1">${numFmtXml}</numFmts>`)
+  }
+
+  // 3. Añadir fills únicos
+  const fillIdxMap = new Map() // argb → fillIdx en la tabla
+  const fillCountMatch = xml.match(/<fills count="(\d+)"/)
+  let fillCount = fillCountMatch ? parseInt(fillCountMatch[1]) : 0
+  let newFillsXml = ''
+  for (const argb of fillArgbs) {
+    if (!argb || fillIdxMap.has(argb)) continue
+    fillIdxMap.set(argb, fillCount)
+    newFillsXml += `<fill><patternFill patternType="solid"><fgColor rgb="${argb}"/><bgColor indexed="64"/></patternFill></fill>`
+    fillCount++
+  }
+  if (newFillsXml) {
+    xml = xml.replace(/<\/fills>/, newFillsXml + '</fills>')
+    xml = xml.replace(/<fills count="\d+"/, `<fills count="${fillCount}"`)
+  }
+
+  // 4. Añadir xf en cellXfs: regular (numFmtId=0) y fecha por cada color
+  const xfCountMatch = xml.match(/<cellXfs count="(\d+)"/)
+  let xfCount = xfCountMatch ? parseInt(xfCountMatch[1]) : 0
+  const styleIdxMap = new Map()     // argb → xfIndex (texto/número)
+  const dateStyleIdxMap = new Map() // argb → xfIndex (fecha DD/MM/YYYY)
+  let newXfsXml = ''
+  const allArgbs = ['', ...fillArgbs.filter(a => a && !styleIdxMap.has(a))]
+  for (const argb of allArgbs) {
+    if (styleIdxMap.has(argb)) continue
+    const fillId = argb ? fillIdxMap.get(argb) : 0
+    const fillAttr = argb ? ` fillId="${fillId}" applyFill="1"` : ' fillId="0"'
+    // Estilo regular
+    newXfsXml += `<xf numFmtId="0" fontId="${calibri9Idx}" borderId="0" xfId="0"${fillAttr} applyFont="1"/>`
+    styleIdxMap.set(argb, xfCount++)
+    // Estilo fecha
+    newXfsXml += `<xf numFmtId="${dateNumFmtId}" fontId="${calibri9Idx}" borderId="0" xfId="0"${fillAttr} applyFont="1" applyNumberFormat="1"/>`
+    dateStyleIdxMap.set(argb, xfCount++)
+  }
+  xml = xml.replace(/<\/cellXfs>/, newXfsXml + '</cellXfs>')
+  xml = xml.replace(/<cellXfs count="\d+"/, `<cellXfs count="${xfCount}"`)
+
+  return { updatedStylesXml: xml, styleIdxMap, dateStyleIdxMap }
+}
+
+/**
+ * Extrae cualquier hoja como XLSX standalone con fórmulas evaluadas por HyperFormula.
+ * Carga todas las hojas dependientes y produce un ZIP mínimo con solo la hoja objetivo.
+ */
+async function extractSheetStandalone(files, workbookXml, relsXml, sheetName) {
   // ── 1. Shared strings ──────────────────────────────────────────────────────
-  const ssXml = strFromU8(files['xl/sharedStrings.xml'])
-  const ssArr = buildSsReverseArray(ssXml)
-  const { map: ssForwardMap } = parseSharedStrings(ssXml)
+  const sharedStrXml = strFromU8(files['xl/sharedStrings.xml'])
+  const ssArr = buildSsReverseArray(sharedStrXml)
+  const { map: ssForwardMap } = parseSharedStrings(sharedStrXml)
 
   // ── 2. Cargar HyperFormula ─────────────────────────────────────────────────
   const { HyperFormula } = await import('hyperformula')
 
-  // ── 3. Parsear hojas estáticas (solo valores cacheados) ────────────────────
+  // ── 3. Hojas dependientes como valores estáticos (cacheados) ──────────────
   const sheetsData = {}
   const staticSheets = [
     'Parametros', 'Maestro Personal', 'Devengos',
     'rev incapacidades', 'Pensionado', 'Validacion novedades',
-    'Planilla Mes anterior', 'Conceptos',
+    'Planilla Mes anterior', 'Conceptos', 'rete adic', 'revision vac ',
   ]
   for (const name of staticSheets) {
+    if (name === sheetName) continue  // la hoja objetivo se carga con fórmulas abajo
     try {
       const p = resolveSheetZipPath(workbookXml, relsXml, name)
-      if (files[p]) sheetsData[name] = parseSheetXmlToValues(strFromU8(files[p]), ssArr)
-    } catch (_) { /* hoja no encontrada, omitir */ }
+      if (p && files[p]) sheetsData[name] = parseSheetXmlToValues(strFromU8(files[p]), ssArr)
+    } catch (_) {}
   }
 
-  // Detallado Mes — con fórmulas (columnas J-P usan VLOOKUP contra Conceptos)
-  try {
-    const p = resolveSheetZipPath(workbookXml, relsXml, 'Detallado Mes')
-    if (files[p]) sheetsData['Detallado Mes'] = parseSheetXmlToFormulas(strFromU8(files[p]), ssArr)
-  } catch (_) {}
+  // Detallado Mes con fórmulas (columnas J-P usan VLOOKUP contra Conceptos)
+  if (sheetName !== 'Detallado Mes') {
+    try {
+      const p = resolveSheetZipPath(workbookXml, relsXml, 'Detallado Mes')
+      if (p && files[p]) sheetsData['Detallado Mes'] = parseSheetXmlToFormulas(strFromU8(files[p]), ssArr)
+    } catch (_) {}
+  }
 
-  // Seguridad Social — con fórmulas (es lo que evaluamos)
-  const ss19Path = resolveSheetZipPath(workbookXml, relsXml, 'Seguridad Social')
-  const ss19Xml = strFromU8(files[ss19Path])
-  sheetsData['Seguridad Social'] = parseSheetXmlToFormulas(ss19Xml, ssArr)
+  // ── 4. Hoja objetivo con fórmulas ──────────────────────────────────────────
+  const targetPath = resolveSheetZipPath(workbookXml, relsXml, sheetName)
+  const targetXml = strFromU8(files[targetPath])
+  sheetsData[sheetName] = parseSheetXmlToFormulas(targetXml, ssArr)
 
-  // ── 4. Instanciar HyperFormula y evaluar ───────────────────────────────────
+  // ── 5. Instanciar HyperFormula y evaluar ───────────────────────────────────
   const hf = HyperFormula.buildFromSheets(sheetsData, { licenseKey: 'gpl-v3' })
-  const ssSheetId = hf.getSheetId('Seguridad Social')
-  const ssGrid = sheetsData['Seguridad Social']
+  const targetSheetId = hf.getSheetId(sheetName)
+  const targetGrid = sheetsData[sheetName]
 
-  // ── 5. Extraer valores evaluados de Seguridad Social ──────────────────────
   const evalMap = new Map()
-  for (let r = 0; r < ssGrid.length; r++) {
-    for (let c = 0; c < (ssGrid[r] || []).length; c++) {
+  for (let r = 0; r < targetGrid.length; r++) {
+    for (let c = 0; c < (targetGrid[r] || []).length; c++) {
       try {
-        const val = hf.getCellValue({ sheet: ssSheetId, row: r, col: c })
+        const val = hf.getCellValue({ sheet: targetSheetId, row: r, col: c })
         if (val !== null && val !== undefined) {
           evalMap.set(`${colToLetter(c + 1)}${r + 1}`, val)
         }
@@ -901,22 +1189,20 @@ async function extractSegSocial(files, workbookXml, relsXml) {
     }
   }
 
-  // ── 6. Reconstruir sheet19 con valores en lugar de fórmulas ───────────────
+  // ── 6. Reconstruir XML con valores en lugar de fórmulas ───────────────────
   // Quitar referencia a printerSettings (no existe en el XLSX standalone)
-  const cleanedSheet19 = ss19Xml.replace(/\s+r:id="rId\d+"/g, (m, offset, str) => {
-    // Solo quitar r:id dentro de pageSetup
+  const cleanedXml = targetXml.replace(/\s+r:id="rId\d+"/g, (m, offset, str) => {
     const before = str.lastIndexOf('<', offset)
     return str.slice(before, offset).includes('pageSetup') ? '' : m
   })
-  const evaluatedSheet19 = replaceFormulasWithValues(cleanedSheet19, evalMap, ssForwardMap)
+  const evaluatedXml = replaceFormulasWithValues(cleanedXml, evalMap, ssForwardMap)
 
-  // ── 7. Construir ZIP mínimo con solo Seguridad Social ─────────────────────
+  // ── 7. Construir ZIP mínimo con solo la hoja objetivo ─────────────────────
+  const safeName = sheetName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
   const CT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/></Types>`
-
   const RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`
-
-  const WB_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Seguridad Social" sheetId="1" r:id="rId1"/></sheets></workbook>`
-
+  const WB_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${safeName}" sheetId="1" r:id="rId1"/></sheets></workbook>`
   const WB_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>`
 
   const newFiles = {
@@ -924,13 +1210,68 @@ async function extractSegSocial(files, workbookXml, relsXml) {
     '_rels/.rels': strToU8(RELS_XML),
     'xl/workbook.xml': strToU8(WB_XML),
     'xl/_rels/workbook.xml.rels': strToU8(WB_RELS_XML),
-    'xl/worksheets/sheet1.xml': strToU8(evaluatedSheet19),
+    'xl/worksheets/sheet1.xml': strToU8(evaluatedXml),
     'xl/sharedStrings.xml': files['xl/sharedStrings.xml'],
     'xl/styles.xml': files['xl/styles.xml'],
   }
   if (files['xl/theme/theme1.xml']) newFiles['xl/theme/theme1.xml'] = files['xl/theme/theme1.xml']
 
   return zipSync(newFiles)
+}
+
+/** Wrapper: extrae "Seguridad Social" como XLSX standalone */
+async function extractSegSocial(files, workbookXml, relsXml) {
+  return extractSheetStandalone(files, workbookXml, relsXml, 'Seguridad Social')
+}
+
+// ─── Valores por defecto de Parámetros (fallback si la plantilla no carga) ────
+const PARAMS_DEFAULTS = {
+  uvt: 52374,
+  ret: [
+    { desde: 95,   tarifa: 0.19, descuento: 0   },
+    { desde: 150,  tarifa: 0.28, descuento: 10  },
+    { desde: 360,  tarifa: 0.33, descuento: 69  },
+    { desde: 640,  tarifa: 0.35, descuento: 162 },
+    { desde: 945,  tarifa: 0.37, descuento: 268 },
+    { desde: 2300, tarifa: 0.39, descuento: 770 },
+  ],
+  sol: [
+    { rango: 4,  tarifa: 0.01   },
+    { rango: 16, tarifa: 0.012  },
+    { rango: 17, tarifa: 0.014  },
+    { rango: 18, tarifa: 0.016  },
+    { rango: 19, tarifa: 0.018  },
+    { rango: 20, tarifa: 0.02   },
+  ],
+  reteAdic: [],
+}
+
+/** Lee los valores de parámetros desde la hoja Parametros (sheet10.xml) */
+function extractParamsFromSheet(sheetXml) {
+  const cellMap = new Map()
+  const cellRe = /<c r="([A-Z]{1,3}\d+)"([^>]*)(?<!\/)>([\s\S]*?)<\/c>/g
+  let cm
+  while ((cm = cellRe.exec(sheetXml)) !== null) {
+    const ref = cm[1]
+    const inner = cm[3]
+    const vM = inner.match(/<v>([^<]*)<\/v>/)
+    if (vM) cellMap.set(ref, parseFloat(vM[1]))
+  }
+  const uvt = cellMap.get('D13') ?? PARAMS_DEFAULTS.uvt
+  const ret = []
+  const sol = []
+  for (let r = 23; r <= 28; r++) {
+    ret.push({
+      desde:     cellMap.get(`B${r}`) ?? PARAMS_DEFAULTS.ret[r - 23].desde,
+      tarifa:    cellMap.get(`C${r}`) ?? PARAMS_DEFAULTS.ret[r - 23].tarifa,
+      descuento: cellMap.get(`D${r}`) ?? PARAMS_DEFAULTS.ret[r - 23].descuento,
+    })
+    sol.push({
+      rango:  cellMap.get(`F${r}`) ?? PARAMS_DEFAULTS.sol[r - 23].rango,
+      tarifa: cellMap.get(`H${r}`) ?? PARAMS_DEFAULTS.sol[r - 23].tarifa,
+    })
+  }
+  return { uvt, ret, sol, reteAdic: [] }  // reteAdic se carga por separado desde su hoja
 }
 
 function downloadBlob(bytes, filename) {
@@ -954,12 +1295,51 @@ function App() {
   const [isDraggingNomina, setIsDraggingNomina] = useState(false)
   const [fileMaestro, setFileMaestro] = useState(null)
   const [isDraggingMaestro, setIsDraggingMaestro] = useState(false)
+  const [filePlantilla, setFilePlantilla] = useState(null)
+  const [isDraggingPlantilla, setIsDraggingPlantilla] = useState(false)
+  const [fileNovedades, setFileNovedades] = useState(null)
+  const [isDraggingNovedades, setIsDraggingNovedades] = useState(false)
   const [isHelpExpanded, setIsHelpExpanded] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [modal, setModal] = useState(null)
+  const [params, setParams] = useState(null)
+  const [activeTab, setActiveTab] = useState('validacion')
   const fileInputRef = useRef(null)
   const fileNominaRef = useRef(null)
   const fileMaestroRef = useRef(null)
+  const filePlantillaRef = useRef(null)
+  const fileNovedadesRef = useRef(null)
+
+  // Función helper: extrae params desde un ArrayBuffer de plantilla
+  const loadParamsFromBuffer = (buf) => {
+    try {
+      const tplFiles = unzipSync(new Uint8Array(buf))
+      const wbXml = strFromU8(tplFiles['xl/workbook.xml'])
+      const relsXml = strFromU8(tplFiles['xl/_rels/workbook.xml.rels'])
+      const ssXml = strFromU8(tplFiles['xl/sharedStrings.xml'])
+      const ssArr = buildSsReverseArray(ssXml)
+      let loadedParams = { ...PARAMS_DEFAULTS }
+      const paramPath = resolveSheetZipPath(wbXml, relsXml, 'Parametros')
+      if (paramPath && tplFiles[paramPath]) {
+        loadedParams = extractParamsFromSheet(strFromU8(tplFiles[paramPath]))
+      }
+      const reteAdicPath = resolveSheetZipPath(wbXml, relsXml, 'rete adic')
+      if (reteAdicPath && tplFiles[reteAdicPath]) {
+        loadedParams.reteAdic = parseReteAdicSheet(strFromU8(tplFiles[reteAdicPath]), ssArr)
+      }
+      return loadedParams
+    } catch {
+      return { ...PARAMS_DEFAULTS }
+    }
+  }
+
+  // Al montar: carga parámetros desde la plantilla por defecto (fallback)
+  useEffect(() => {
+    fetch('/Ejemplo Validacion de Nomina.xlsx')
+      .then(r => r.ok ? r.arrayBuffer() : Promise.reject())
+      .then(buf => setParams(loadParamsFromBuffer(buf)))
+      .catch(() => setParams({ ...PARAMS_DEFAULTS }))
+  }, [])
 
   const validateExcel = (f) => {
     if (!f) return false
@@ -973,6 +1353,12 @@ function App() {
   const handleFile = (f) => { if (validateExcel(f)) setFile(f) }
   const handleFileNomina = (f) => { if (validateExcel(f)) setFileNomina(f) }
   const handleFileMaestro = (f) => { if (validateExcel(f)) setFileMaestro(f) }
+  const handleFilePlantilla = (f) => {
+    if (!validateExcel(f)) return
+    setFilePlantilla(f)
+    // Recargar parámetros desde la nueva plantilla
+    f.arrayBuffer().then(buf => setParams(loadParamsFromBuffer(buf))).catch(() => {})
+  }
 
   const handleDrop = (e) => {
     e.preventDefault()
@@ -992,6 +1378,19 @@ function App() {
     handleFileMaestro(e.dataTransfer.files[0])
   }
 
+  const handleDropPlantilla = (e) => {
+    e.preventDefault()
+    setIsDraggingPlantilla(false)
+    handleFilePlantilla(e.dataTransfer.files[0])
+  }
+
+  const handleFileNovedades = (f) => { if (validateExcel(f)) setFileNovedades(f) }
+  const handleDropNovedades = (e) => {
+    e.preventDefault()
+    setIsDraggingNovedades(false)
+    handleFileNovedades(e.dataTransfer.files[0])
+  }
+
   const removeFile = () => {
     setFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -1005,6 +1404,21 @@ function App() {
   const removeFileMaestro = () => {
     setFileMaestro(null)
     if (fileMaestroRef.current) fileMaestroRef.current.value = ''
+  }
+
+  const removeFilePlantilla = () => {
+    setFilePlantilla(null)
+    if (filePlantillaRef.current) filePlantillaRef.current.value = ''
+    // Volver a cargar params desde plantilla por defecto
+    fetch('/Ejemplo Validacion de Nomina.xlsx')
+      .then(r => r.ok ? r.arrayBuffer() : Promise.reject())
+      .then(buf => setParams(loadParamsFromBuffer(buf)))
+      .catch(() => setParams({ ...PARAMS_DEFAULTS }))
+  }
+
+  const removeFileNovedades = () => {
+    setFileNovedades(null)
+    if (fileNovedadesRef.current) fileNovedadesRef.current.value = ''
   }
 
   const formatBytes = (bytes) => {
@@ -1081,9 +1495,14 @@ function App() {
       }
 
       // ── Cargar plantilla ─────────────────────────────────────────────────────
-      const res = await fetch('/Ejemplo Validacion de Nomina.xlsx')
-      if (!res.ok) throw new Error('No se pudo cargar la plantilla de validación.')
-      const templateBytes = new Uint8Array(await res.arrayBuffer())
+      let templateBytes
+      if (filePlantilla) {
+        templateBytes = new Uint8Array(await filePlantilla.arrayBuffer())
+      } else {
+        const res = await fetch('/Ejemplo Validacion de Nomina.xlsx')
+        if (!res.ok) throw new Error('No se pudo cargar la plantilla de validación.')
+        templateBytes = new Uint8Array(await res.arrayBuffer())
+      }
       const files = unzipSync(templateBytes)
       const workbookXml = strFromU8(files['xl/workbook.xml'])
       const relsXml = strFromU8(files['xl/_rels/workbook.xml.rels'])
@@ -1112,10 +1531,10 @@ function App() {
 
       if (fileNomina) {
         for (const srcRow of nominaRows) {
-          // cols 1(CODIGO EMPLEADO), 2(NOMBRES EMPLEADO), 3(CONCEPTO), 4(NOMBRE CONCEPTO)
-          for (const col of [1, 2, 3, 4]) {
+          // Cols de texto para Detallado Mes (1-4) + cols adicionales para BVAC (10, 13-16, 18)
+          for (const col of [1, 2, 3, 4, 10, 13, 14, 15, 16, 18]) {
             const v = getCellValue(srcRow.getCell(col))
-            if (v != null) { const s = String(v).trim(); if (s) neededStrings.add(s) }
+            if (v != null && !(v instanceof Date)) { const s = String(v).trim(); if (s) neededStrings.add(s) }
           }
         }
       }
@@ -1226,6 +1645,98 @@ function App() {
 
         files[detPath] = strToU8(rebuildSheetData(strFromU8(files[detPath]), detRowsXml, 3))
 
+        // ── Anexar nómina a BVAC (debajo del último registro existente) ──────
+        try {
+          const bvacPath = resolveSheetZipPath(workbookXml, relsXml, 'BVAC ')
+          if (bvacPath && files[bvacPath]) {
+            // Recoger colores de relleno únicos desde las filas de nómina
+            const uniqueFillArgbs = []
+            const seenArgbs = new Set()
+            for (const srcRow of nominaRows) {
+              const fill = srcRow.fill ?? srcRow.getCell?.(1)?.fill
+              const argb = fill?.fgColor?.argb ?? ''
+              if (!seenArgbs.has(argb)) { seenArgbs.add(argb); uniqueFillArgbs.push(argb) }
+            }
+            // Añadir Calibri 9 + fills + estilos fecha a styles.xml y obtener mapas de estilos
+            const { updatedStylesXml: bvacStylesXml, styleIdxMap: bvacStyleMap, dateStyleIdxMap: bvacDateStyleMap } =
+              addStylesForBvac(strFromU8(files['xl/styles.xml']), uniqueFillArgbs)
+            files['xl/styles.xml'] = strToU8(bvacStylesXml)
+
+            const bvacXml = strFromU8(files[bvacPath])
+            // Encontrar la última fila con datos
+            const rowNums = [...bvacXml.matchAll(/<row r="(\d+)"/g)].map(m => parseInt(m[1]))
+            const lastRow = rowNums.length > 0 ? Math.max(...rowNums) : 1
+
+            const bvacNewRows = nominaRows.map((srcRow, idx) => {
+              const r = lastRow + 1 + idx
+              // Estilo: Calibri 9 + color de fila
+              const fill = srcRow.fill ?? srcRow.getCell?.(1)?.fill
+              const fillArgb = fill?.fgColor?.argb ?? ''
+              const sIdx = bvacStyleMap.get(fillArgb) ?? bvacStyleMap.get('')
+              const s = sIdx !== undefined ? ` s="${sIdx}"` : ''
+              const dsIdx = bvacDateStyleMap.get(fillArgb) ?? bvacDateStyleMap.get('')
+              const sDate = dsIdx !== undefined ? ` s="${dsIdx}"` : s
+
+              let c = ''
+              // A: CODIGO EMPLEADO (numérico)
+              const emp = getCellValue(srcRow.getCell(1))
+              const empStr = (emp == null ? '' : String(emp)).trim()
+              if (empStr && /^\d+$/.test(empStr)) c += `<c r="A${r}"${s}><v>${empStr}</v></c>`
+              // B: NOMBRES EMPLEADO (texto)
+              const bIdx = strIdxMap.get(String(getCellValue(srcRow.getCell(2)) ?? '').trim())
+              if (bIdx !== undefined) c += `<c r="B${r}"${s} t="s"><v>${bIdx}</v></c>`
+              // C: CONCEPTO (texto — preservar ceros iniciales como "001050")
+              const cIdx = strIdxMap.get(String(getCellValue(srcRow.getCell(3)) ?? '').trim())
+              if (cIdx !== undefined) c += `<c r="C${r}"${s} t="s"><v>${cIdx}</v></c>`
+              // D: NOMBRE CONCEPTO (texto)
+              const dIdx = strIdxMap.get(String(getCellValue(srcRow.getCell(4)) ?? '').trim())
+              if (dIdx !== undefined) c += `<c r="D${r}"${s} t="s"><v>${dIdx}</v></c>`
+              // E: CANTIDAD (número)
+              const cant = Number(getCellValue(srcRow.getCell(5)) ?? 0)
+              c += `<c r="E${r}"${s}><v>${isNaN(cant) ? 0 : cant}</v></c>`
+              // F: DEVENGOS, G: DEDUCCIONES, H: PAGOS INDIRECTOS, I: NETO PAGADO
+              for (const [colNum, letter] of [[6,'F'],[7,'G'],[8,'H'],[9,'I']]) {
+                const n = Number(getCellValue(srcRow.getCell(colNum)) ?? 0)
+                c += `<c r="${letter}${r}"${s}><v>${isNaN(n) ? 0 : n}</v></c>`
+              }
+              // J: TIPO DE LIQUIDACION (texto)
+              const jIdx = strIdxMap.get(String(getCellValue(srcRow.getCell(10)) ?? '').trim())
+              if (jIdx !== undefined) c += `<c r="J${r}"${s} t="s"><v>${jIdx}</v></c>`
+              // K: FECHA DE CORTE, L: FECHA DE LIQUIDACION (fecha → serial Excel con formato DD/MM/YYYY)
+              for (const [colNum, letter] of [[11,'K'],[12,'L']]) {
+                const raw = getCellValue(srcRow.getCell(colNum))
+                if (raw instanceof Date) {
+                  c += `<c r="${letter}${r}"${sDate}><v>${jsDateToExcelSerial(raw)}</v></c>`
+                } else if (raw != null && !isNaN(Number(raw))) {
+                  c += `<c r="${letter}${r}"${sDate}><v>${Number(raw)}</v></c>`
+                }
+              }
+              // M: ORIGEN, N: COMPAÑIA, O: SUCURSAL (texto)
+              for (const [colNum, letter] of [[13,'M'],[14,'N'],[15,'O']]) {
+                const sidx = strIdxMap.get(String(getCellValue(srcRow.getCell(colNum)) ?? '').trim())
+                if (sidx !== undefined) c += `<c r="${letter}${r}"${s} t="s"><v>${sidx}</v></c>`
+              }
+              // P: CENTRO DE COSTOS (texto — ej. "5180")
+              const pIdx = strIdxMap.get(String(getCellValue(srcRow.getCell(16)) ?? '').trim())
+              if (pIdx !== undefined) c += `<c r="P${r}"${s} t="s"><v>${pIdx}</v></c>`
+              // Q: SUELDO BASICO (número)
+              const q = Number(getCellValue(srcRow.getCell(17)) ?? 0)
+              if (!isNaN(q)) c += `<c r="Q${r}"${s}><v>${q}</v></c>`
+              // R: CARGO (texto)
+              const rIdx = strIdxMap.get(String(getCellValue(srcRow.getCell(18)) ?? '').trim())
+              if (rIdx !== undefined) c += `<c r="R${r}"${s} t="s"><v>${rIdx}</v></c>`
+
+              return c ? `<row r="${r}" spans="1:18" x14ac:dyDescent="0.3">${c}</row>` : ''
+            }).filter(Boolean).join('')
+
+            const newLastRow = lastRow + nominaRows.length
+            const bvacUpdated = bvacXml
+              .replace(/<dimension ref="[^"]*"\/>/,  `<dimension ref="A1:R${newLastRow}"/>`)
+              .replace(/<\/sheetData>/, bvacNewRows + '</sheetData>')
+            files[bvacPath] = strToU8(bvacUpdated)
+          }
+        } catch (_) { /* BVAC no encontrado, continuar */ }
+
         // ── Procesar rev incapacidades ───────────────────────────────────────
         const INCAP_CONCEPTOS = new Set(['001150', '001151', '001177', '001178'])
         const incapRows = nominaRows.filter(srcRow => {
@@ -1234,8 +1745,32 @@ function App() {
         })
         const revPath = resolveSheetZipPath(workbookXml, relsXml, 'rev incapacidades')
         if (files[revPath] && incapRows.length > 0) {
+          // Pre-construir mapa empCode → cantidad del concepto 001150 (para usarla en 001177)
+          const emp001150CantMap = new Map()
+          for (const srcRow of incapRows) {
+            const conc = String(getCellValue(srcRow.getCell(3)) ?? '').trim()
+            if (conc === '001150') {
+              const emp = String(getCellValue(srcRow.getCell(1)) ?? '').trim()
+              const cant = Number(getCellValue(srcRow.getCell(5)) ?? 0)
+              if (emp) emp001150CantMap.set(emp, isNaN(cant) ? 0 : cant)
+            }
+          }
           const revRowsXml = incapRows.map((srcRow, idx) => {
             const r = idx + 13 // datos desde fila 13 (encabezados en fila 12)
+            const conc = String(getCellValue(srcRow.getCell(3)) ?? '').trim()
+            let kRef = '$C$4'
+            let cantidadOverride = null
+            let pct = '70%'
+            if (conc === '001150') {
+              kRef = '$C$3'
+            } else if (conc === '001177') {
+              kRef = '$C$5'
+              const emp = String(getCellValue(srcRow.getCell(1)) ?? '').trim()
+              if (emp001150CantMap.has(emp)) cantidadOverride = emp001150CantMap.get(emp)
+            } else if (conc === '001178') {
+              kRef = '$C$6'
+              pct = '100%'
+            }
             return buildRevIncapRow(
               r,
               getCellValue(srcRow.getCell(1)), // CODIGO EMPLEADO
@@ -1245,12 +1780,16 @@ function App() {
               getCellValue(srcRow.getCell(5)), // CANTIDAD
               getCellValue(srcRow.getCell(6)), // DEVENGOS
               getCellValue(srcRow.getCell(7)), // DEDUCCIONES
-              strIdxMap
+              strIdxMap,
+              kRef,
+              cantidadOverride,
+              pct
             )
           }).join('')
           files[revPath] = strToU8(rebuildSheetData(strFromU8(files[revPath]), revRowsXml, 12))
 
-          // ── TablaDinámica4: calcular pivot P:S en "rev incapacidades" ──────
+          /* ── TablaDinámica4: calcular pivot P:S en "rev incapacidades" ──────
+          // COMENTADO TEMPORALMENTE PARA VERIFICACIÓN
           // Fuente: B12:G204 misma hoja. Filas=CODIGO EMPLEADO, Cols=NOMBRE CONCEPTO
           // Col Q = "Inc. Enfermedad Comun Asumida", Col R = "Inc. por Enfermedad Comun"
           // Datos = SUM CANTIDAD (col F de la fuente = col 5 de srcRow nómina)
@@ -1307,6 +1846,62 @@ function App() {
           let revSheetXml = strFromU8(files[revPath])
           revSheetXml = overwritePivotInSheet(revSheetXml, pivot4CellMap)
           files[revPath] = strToU8(revSheetXml)
+          ── FIN TablaDinámica4 comentado */
+        }
+
+        // ── Procesar revision vac ────────────────────────────────────────────
+        const VAC_CONCEPTOS = new Set(['Vacaciones', 'Ajuste Vacaciones', 'Vacaciones en Dinero'])
+        const vacRows = nominaRows.filter(srcRow => {
+          const desc = String(getCellValue(srcRow.getCell(4)) ?? '').trim()
+          return VAC_CONCEPTOS.has(desc)
+        })
+        const rvPath = resolveSheetZipPath(workbookXml, relsXml, 'revision vac ')
+        if (rvPath && files[rvPath] && vacRows.length > 0) {
+          const rvRowsXml = vacRows.map((srcRow, idx) => {
+            const r = idx + 3 // datos desde fila 3 (encabezados en fila 2)
+            const getIdx = (v) => {
+              const s = (v == null ? '' : String(v)).trim()
+              return s ? strIdxMap.get(s) : undefined
+            }
+            let c = ''
+            // A: código empleado (numérico, s="84")
+            const empStr = (getCellValue(srcRow.getCell(1)) == null ? '' : String(getCellValue(srcRow.getCell(1)))).trim()
+            if (empStr && /^\d+$/.test(empStr)) {
+              c += `<c r="A${r}" s="84"><v>${empStr}</v></c>`
+            } else if (empStr) {
+              const si = getIdx(empStr)
+              if (si !== undefined) c += `<c r="A${r}" s="84" t="s"><v>${si}</v></c>`
+            }
+            // B: nombre empleado (shared string, s="84")
+            const bSi = getIdx(getCellValue(srcRow.getCell(2)))
+            if (bSi !== undefined) c += `<c r="B${r}" s="84" t="s"><v>${bSi}</v></c>`
+            // C: código concepto (shared string, s="84")
+            const cSi = getIdx(getCellValue(srcRow.getCell(3)))
+            if (cSi !== undefined) c += `<c r="C${r}" s="84" t="s"><v>${cSi}</v></c>`
+            // D: nombre concepto (shared string, s="84")
+            const dSi = getIdx(getCellValue(srcRow.getCell(4)))
+            if (dSi !== undefined) c += `<c r="D${r}" s="84" t="s"><v>${dSi}</v></c>`
+            // E: cantidad (numérico, s="85")
+            const cant = Number(getCellValue(srcRow.getCell(5)) ?? 0)
+            c += `<c r="E${r}" s="85"><v>${isNaN(cant) ? 0 : cant}</v></c>`
+            // F: devengos (numérico, s="85")
+            const dev = Number(getCellValue(srcRow.getCell(6)) ?? 0)
+            c += `<c r="F${r}" s="85"><v>${isNaN(dev) ? 0 : dev}</v></c>`
+            // H-N: fórmulas (ajustadas a la fila r)
+            c += `<c r="H${r}"><f>VLOOKUP(A${r},'Maestro Personal'!$B$2:$AH$333,33,0)</f></c>`
+            c += `<c r="I${r}" s="22"><f>VLOOKUP(A${r},'Maestro Personal'!$B$2:$AA$333,26,0)</f></c>`
+            c += `<c r="J${r}" s="189"><f>+IF(DAYS360(I${r},$J$1)+1&gt;360,360,DAYS360(I${r},$J$1)+3)</f></c>`
+            c += `<c r="K${r}" s="60"><f>IFERROR(VLOOKUP(A${r},'BVAC '!$Y:$Z,2,0),0)/J${r}*30</f></c>`
+            c += `<c r="L${r}" s="60"><f>+K${r}+H${r}</f></c>`
+            c += `<c r="M${r}" s="60"><f>L${r}/30*E${r}</f></c>`
+            c += `<c r="N${r}" s="158"><f>M${r}-F${r}</f></c>`
+            return `<row r="${r}" spans="1:15" x14ac:dyDescent="0.3">${c}</row>`
+          }).join('')
+          const rvLastRow = 2 + vacRows.length
+          let rvXml = strFromU8(files[rvPath])
+          rvXml = rvXml.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:O${rvLastRow}"/>`)
+          rvXml = rebuildSheetData(rvXml, rvRowsXml, 2)
+          files[rvPath] = strToU8(rvXml)
         }
       }
 
@@ -1321,14 +1916,181 @@ function App() {
         files[mpPath] = strToU8(rebuildSheetData(strFromU8(files[mpPath]), mpRowsXml, 1))
       }
 
-      // ── Actualizar col A de "Seguridad Social" con códigos de empleados ──────
+      // ── Procesar Validacion novedades ────────────────────────────────────────
+      if (fileNomina && nominaRows.length > 0) {
+        const vnPath = resolveSheetZipPath(workbookXml, relsXml, 'Validacion novedades')
+        if (files[vnPath]) {
+          // Ordenar por DESCRIPCION CONCEPTO (col 4) A→Z
+          const sortedNomina = [...nominaRows].sort((a, b) => {
+            const da = String(getCellValue(a.getCell(4)) ?? '').trim()
+            const db = String(getCellValue(b.getCell(4)) ?? '').trim()
+            return da.localeCompare(db, undefined, { sensitivity: 'base' })
+          })
+          const lastDataRow = 3 + sortedNomina.length
+          const vnRowsXml = sortedNomina.map((srcRow, idx) => {
+            const r = idx + 4 // datos desde fila 4 (encabezados en fila 3)
+            const descConceptoVal = getCellValue(srcRow.getCell(4))
+            const cantidadVal = String(descConceptoVal ?? '').trim() === 'SIP Payment'
+              ? 0
+              : getCellValue(srcRow.getCell(5))
+            return buildValNovedadesRow(
+              r,
+              getCellValue(srcRow.getCell(1)), // CODIGO EMPLEADO → col B
+              getCellValue(srcRow.getCell(2)), // NOMBRES EMPLEADO → col C
+              getCellValue(srcRow.getCell(3)), // CONCEPTO → col D
+              descConceptoVal,                 // NOMBRE CONCEPTO → col E
+              cantidadVal,                     // CANTIDAD → col F
+              getCellValue(srcRow.getCell(6)), // DEVENGOS → col G
+              getCellValue(srcRow.getCell(7)), // DEDUCCIONES → col H
+              strIdxMap
+            )
+          }).join('')
+          let vnXml = rebuildSheetData(strFromU8(files[vnPath]), vnRowsXml, 3)
+          // Actualizar rangos del autoFilter y sortState al número real de filas
+          vnXml = vnXml
+            .replace(/(<autoFilter\b[^>]*\bref=")[^"]*(")/,   `$1A3:N${lastDataRow}$2`)
+            .replace(/(<sortState\b[^>]*\bref=")[^"]*(")/,    `$1A4:N${lastDataRow}$2`)
+            .replace(/(<sortCondition\b[^>]*\bref=")[^"]*(")/,`$1E3:E${lastDataRow}$2`)
+          files[vnPath] = strToU8(vnXml)
+        }
+      }
+
+      // ── Procesar Novedades del cliente ("All Entitlements" → hoja "Novedades") ─
+      if (fileNovedades) {
+        const novClienteBuf = await fileNovedades.arrayBuffer()
+        const novWb = new ExcelJS.Workbook()
+        await novWb.xlsx.load(novClienteBuf)
+        const allEnt = novWb.getWorksheet('All Entitlements')
+        if (!allEnt) throw new Error('No se encontró la hoja "All Entitlements" en el archivo de Novedades.')
+
+        // Recoger filas desde fila 2 (fila 1 = encabezados)
+        const novEntRows = []
+        allEnt.eachRow({ includeEmpty: false }, (row, rowNum) => {
+          if (rowNum < 2) return
+          const colA = getCellValue(row.getCell(1))  // Employee No
+          const colD = getCellValue(row.getCell(4))  // Element Type
+          const colK = getCellValue(row.getCell(11)) // col K (fallback para F)
+          const colN = getCellValue(row.getCell(14)) // No. Of Units
+          const colS = getCellValue(row.getCell(19)) // Task ID
+          if (colA != null && String(colA).trim()) novEntRows.push({ colA, colD, colK, colN, colS })
+        })
+
+        if (novEntRows.length > 0) {
+          const novPath = resolveSheetZipPath(workbookXml, relsXml, 'Novedades')
+          if (novPath && files[novPath]) {
+            // Construir XML de filas: A=empleado, B/C/E/G/H/I/J/K=fórmulas, D=código concepto, F=cantidad, L=Task ID
+            const novRowsXml = novEntRows.map(({ colA, colD, colK, colN, colS }, idx) => {
+              const r = idx + 2 // datos desde fila 2
+              const empStr = String(colA).trim()
+              const empIsNum = /^\d+$/.test(empStr)
+              let c = ''
+              // A: código empleado
+              if (empIsNum) {
+                c += `<c r="A${r}" s="114"><v>${empStr}</v></c>`
+              } else {
+                const si = strIdxMap.get(empStr)
+                if (si !== undefined) c += `<c r="A${r}" s="114" t="s"><v>${si}</v></c>`
+              }
+              // B, C: VLOOKUP por código empleado
+              c += `<c r="B${r}" t="str"><f>VLOOKUP(A${r},'Maestro Personal'!$B:$F,4,0)</f></c>`
+              c += `<c r="C${r}" t="str"><f>VLOOKUP(A${r},'Maestro Personal'!$B:$F,5,0)</f></c>`
+              // D: código concepto (mapeado desde Element Type)
+              const elemType = colD != null ? String(colD).trim() : ''
+              const conceptoCod = ELEMENT_TYPE_CODE_MAP.get(elemType)
+              if (conceptoCod) {
+                const si = strIdxMap.get(conceptoCod)
+                if (si !== undefined) {
+                  c += `<c r="D${r}" s="84" t="s"><v>${si}</v></c>`
+                } else {
+                  c += `<c r="D${r}" s="84" t="inlineStr"><is><t>${escapeXml(conceptoCod)}</t></is></c>`
+                }
+              }
+              // E: VLOOKUP por concepto
+              c += `<c r="E${r}" t="str"><f>VLOOKUP(D${r},Conceptos!$A:$B,2,0)</f></c>`
+              // F: cantidad — col N si tiene valor; si no, col K si tiene valor (incluso 0); si no, vacío
+              const nFromN = typeof colN === 'number' ? colN : (colN != null && String(colN).trim() !== '' ? parseFloat(colN) : NaN)
+              const nFromK = typeof colK === 'number' ? colK : (colK != null && String(colK).trim() !== '' ? parseFloat(colK) : NaN)
+              const rawF = !isNaN(nFromN) ? nFromN : (!isNaN(nFromK) ? nFromK : NaN)
+              if (!isNaN(rawF)) {
+                const finalF = conceptoCod === '100015' ? rawF * 80000 : rawF
+                c += `<c r="F${r}"><v>${finalF}</v></c>`
+              }
+              // G: = F (copia cantidad)
+              c += `<c r="G${r}" s="45"><f>F${r}</f></c>`
+              // H: concatenar empleado + concepto
+              c += `<c r="H${r}" t="str"><f>+CONCATENATE(A${r},D${r})</f></c>`
+              // I: SUMIF
+              c += `<c r="I${r}" s="45"><f>+SUMIF(H:H,CONCATENATE(A${r},D${r}),G:G)</f></c>`
+              // J: IFERROR VLOOKUP validacion novedades
+              c += `<c r="J${r}"><f>+IFERROR(VLOOKUP(H${r},'Validacion novedades'!$A:$J,10,0),0)</f></c>`
+              // K: diferencia I - J
+              c += `<c r="K${r}" s="47"><f>+I${r}-J${r}</f></c>`
+              // L: Task ID (columna S del fuente)
+              const colSStr = colS != null ? String(colS).trim() : ''
+              if (colSStr) c += `<c r="L${r}" t="inlineStr"><is><t>${escapeXml(colSStr)}</t></is></c>`
+              return c ? `<row r="${r}" spans="1:13" x14ac:dyDescent="0.3">${c}</row>` : ''
+            }).filter(Boolean).join('')
+
+            const novLastRow = 1 + novEntRows.length
+            let novXml = strFromU8(files[novPath])
+            novXml = novXml
+              .replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:M${novLastRow}"/>`)
+            novXml = rebuildSheetData(novXml, novRowsXml, 1)
+            files[novPath] = strToU8(novXml)
+          }
+        }
+      }
+
+      // ── Actualizar col A de "Seguridad Social", "Devengos" y "Retencion" ──────
       if (fileMaestro && maestroRows.length > 0) {
+        const empCodes = maestroRows
+          .map(row => String(getCellValue(row.getCell(2)) ?? '').trim())
+          .filter(Boolean)
+
         const ssPath = resolveSheetZipPath(workbookXml, relsXml, 'Seguridad Social')
         if (files[ssPath]) {
-          const empCodes = maestroRows
-            .map(row => String(getCellValue(row.getCell(2)) ?? '').trim())
-            .filter(Boolean)
           files[ssPath] = strToU8(patchSegSocialColA(strFromU8(files[ssPath]), empCodes))
+        }
+
+        const devPath = resolveSheetZipPath(workbookXml, relsXml, 'Devengos')
+        if (files[devPath]) {
+          // Devengos: datos desde fila 4 hasta 362, col A s="81"
+          files[devPath] = strToU8(patchSheetColA(strFromU8(files[devPath]), empCodes, 4, 362, '81'))
+        }
+
+        const retPath = resolveSheetZipPath(workbookXml, relsXml, 'Retencion')
+        if (files[retPath]) {
+          // Retencion: datos desde fila 2 hasta 360, col A s="5"
+          files[retPath] = strToU8(patchSheetColA(strFromU8(files[retPath]), empCodes, 2, 360, '5'))
+        }
+
+        const guPath = resolveSheetZipPath(workbookXml, relsXml, 'Gross up')
+        if (files[guPath]) {
+          // Gross up: datos desde fila 2, col A s="36"
+          // Calcular la última fila real del template para que patchSheetColA
+          // sepa cuántas filas ya existen y cuántas nuevas debe crear
+          const guXml = strFromU8(files[guPath])
+          const guRowNums = [...guXml.matchAll(/<row r="(\d+)"/g)].map(m => parseInt(m[1]))
+          const guLastTplRow = guRowNums.length > 1 ? Math.max(...guRowNums) : 65
+          files[guPath] = strToU8(patchSheetColA(guXml, empCodes, 2, guLastTplRow, '36'))
+        }
+      }
+
+      // ── Aplicar parámetros configurados por el usuario ───────────────────────
+      const activeParams = params ?? PARAMS_DEFAULTS
+      const paramPath = resolveSheetZipPath(workbookXml, relsXml, 'Parametros')
+      if (paramPath && files[paramPath]) {
+        files[paramPath] = strToU8(patchParametrosSheet(strFromU8(files[paramPath]), activeParams))
+      }
+
+      // ── Retención adicional ──────────────────────────────────────────────────
+      if (activeParams.reteAdic && activeParams.reteAdic.length > 0) {
+        const reteStrings = activeParams.reteAdic.map(rec => String(rec.nombre)).filter(Boolean)
+        const { strIdxMap, newSsXml } = buildSharedStringIndex(strFromU8(files['xl/sharedStrings.xml']), reteStrings)
+        files['xl/sharedStrings.xml'] = strToU8(newSsXml)
+        const reteAdicPath = resolveSheetZipPath(workbookXml, relsXml, 'rete adic')
+        if (reteAdicPath && files[reteAdicPath]) {
+          files[reteAdicPath] = strToU8(buildReteAdicSheet(strFromU8(files[reteAdicPath]), activeParams.reteAdic, strIdxMap))
         }
       }
 
@@ -1337,7 +2099,11 @@ function App() {
       // Forzar recálculo al abrir en ambos archivos (Seguridad Social depende de Detallado Mes)
       files['xl/workbook.xml'] = strToU8(addFullCalcOnLoad(workbookXml))
       const fullBytes = zipSync(files)
-      const segSocialBytes = await extractSegSocial(files, strFromU8(files['xl/workbook.xml']), relsXml)
+      const updatedWbXml = strFromU8(files['xl/workbook.xml'])
+      const [segSocialBytes, retencionBytes] = await Promise.all([
+        extractSegSocial(files, updatedWbXml, relsXml),
+        extractSheetStandalone(files, updatedWbXml, relsXml, 'Retencion'),
+      ])
 
       const parts = []
       if (file) parts.push(`${dataRows.length} registros IBC`)
@@ -1346,7 +2112,7 @@ function App() {
       setModal({
         type: 'success',
         message: `Se procesaron ${parts.join(' y ')} correctamente.`,
-        blobs: { full: fullBytes, segSocial: segSocialBytes },
+        blobs: { full: fullBytes, segSocial: segSocialBytes, retencion: retencionBytes },
       })
     } catch (err) {
       console.error(err)
@@ -1383,6 +2149,31 @@ function App() {
 
       <main className="main-content">
         <div className="container">
+
+          <div className="tab-nav">
+            <button
+              className={`tab-btn ${activeTab === 'validacion' ? 'active' : ''}`}
+              onClick={() => setActiveTab('validacion')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+              Validación
+            </button>
+            <button
+              className={`tab-btn ${activeTab === 'parametros' ? 'active' : ''}`}
+              onClick={() => setActiveTab('parametros')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+              </svg>
+              Parámetros
+            </button>
+          </div>
+
+          {activeTab === 'validacion' && <>
 
           <div className="help-section">
             <button
@@ -1453,6 +2244,67 @@ function App() {
 
             <div className="card-body">
               <div className="form-section">
+
+                <div className="form-group form-group--plantilla">
+                  <label className="label label--plantilla">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+                    </svg>
+                    Plantilla base (.xlsx)
+                    <span className="label-badge">Requerido</span>
+                  </label>
+                  <p className="plantilla-hint">Sube la plantilla del mes anterior para que los datos se acumulen correctamente en la hoja BVAC. Si no subes ninguna, se usará la plantilla por defecto.</p>
+                  <input
+                    ref={filePlantillaRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    className="file-input"
+                    id="file-upload-plantilla"
+                    onChange={(e) => handleFilePlantilla(e.target.files[0])}
+                  />
+                  {!filePlantilla ? (
+                    <label
+                      htmlFor="file-upload-plantilla"
+                      className={`drop-zone drop-zone--plantilla ${isDraggingPlantilla ? 'drag-active' : ''}`}
+                      onDragOver={(e) => { e.preventDefault(); setIsDraggingPlantilla(true) }}
+                      onDragLeave={() => setIsDraggingPlantilla(false)}
+                      onDrop={handleDropPlantilla}
+                    >
+                      <div className="drop-zone-content">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="17 8 12 3 7 8"/>
+                          <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <div className="drop-zone-text">
+                          <span className="drop-zone-title">Arrastra la plantilla aquí</span>
+                          <span className="drop-zone-subtitle">o haz clic para seleccionarla</span>
+                        </div>
+                        <span className="drop-zone-hint">Formatos aceptados: .xlsx, .xls</span>
+                      </div>
+                    </label>
+                  ) : (
+                    <div className="drop-zone drop-zone--plantilla has-file">
+                      <div className="file-preview">
+                        <div className="file-icon file-icon--plantilla">
+                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+                          </svg>
+                        </div>
+                        <div className="file-details">
+                          <span className="file-name">{filePlantilla.name}</span>
+                          <span className="file-size">{formatBytes(filePlantilla.size)}</span>
+                        </div>
+                        <button className="btn-remove" onClick={removeFilePlantilla} type="button" aria-label="Eliminar plantilla">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 <div className="form-group">
                   <label className="label">
@@ -1637,10 +2489,71 @@ function App() {
                   )}
                 </div>
 
+                <div className="form-group">
+                  <label className="label">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    Novedades del cliente (.xlsx)
+                  </label>
+                  <input
+                    ref={fileNovedadesRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    className="file-input"
+                    id="file-upload-novedades"
+                    onChange={(e) => handleFileNovedades(e.target.files[0])}
+                  />
+                  {!fileNovedades ? (
+                    <label
+                      htmlFor="file-upload-novedades"
+                      className={`drop-zone ${isDraggingNovedades ? 'drag-active' : ''}`}
+                      onDragOver={(e) => { e.preventDefault(); setIsDraggingNovedades(true) }}
+                      onDragLeave={() => setIsDraggingNovedades(false)}
+                      onDrop={handleDropNovedades}
+                    >
+                      <div className="drop-zone-content">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="17 8 12 3 7 8"/>
+                          <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <div className="drop-zone-text">
+                          <span className="drop-zone-title">Arrastra tu archivo aquí</span>
+                          <span className="drop-zone-subtitle">o haz clic para seleccionarlo</span>
+                        </div>
+                        <span className="drop-zone-hint">Hoja requerida: "All Entitlements"</span>
+                      </div>
+                    </label>
+                  ) : (
+                    <div className="drop-zone has-file">
+                      <div className="file-preview">
+                        <div className="file-icon">
+                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                          </svg>
+                        </div>
+                        <div className="file-details">
+                          <span className="file-name">{fileNovedades.name}</span>
+                          <span className="file-size">{formatBytes(fileNovedades.size)}</span>
+                        </div>
+                        <button className="btn-remove" onClick={removeFileNovedades} type="button" aria-label="Eliminar archivo">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <button
                   className="btn-primary"
                   onClick={processFile}
-                  disabled={(!file && !fileNomina && !fileMaestro) || isProcessing}
+                  disabled={(!file && !fileNomina && !fileMaestro && !filePlantilla && !fileNovedades) || isProcessing}
                 >
                   {isProcessing ? (
                     <>
@@ -1661,9 +2574,224 @@ function App() {
                   )}
                 </button>
 
+                {modal && (
+                  <div className={`result-section ${modal.type}`}>
+                    {modal.type === 'success' ? (
+                      <>
+                        <div className="result-header">
+                          <div className="result-icon">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          </div>
+                          <div>
+                            <h3 className="result-title">¡Listo!</h3>
+                            <p className="result-message">{modal.message}</p>
+                          </div>
+                        </div>
+                        {modal.blobs && (
+                          <div className="result-downloads">
+                            <button
+                              className="result-download-btn primary"
+                              onClick={() => downloadBlob(modal.blobs.segSocial, 'Seguridad_Social.xlsx')}
+                            >
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                              </svg>
+                              Seguridad Social
+                            </button>
+                            <button
+                              className="result-download-btn"
+                              onClick={() => downloadBlob(modal.blobs.retencion, 'Retencion.xlsx')}
+                            >
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                              </svg>
+                              Retención
+                            </button>
+                            <button
+                              className="result-download-btn"
+                              onClick={() => downloadBlob(modal.blobs.full, 'Validacion_Nomina.xlsx')}
+                            >
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                              </svg>
+                              Libro completo
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="result-error-row">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10"/>
+                          <line x1="12" y1="8" x2="12" y2="12"/>
+                          <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <span>{modal.message}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
               </div>
             </div>
           </div>
+          </>}
+
+          {activeTab === 'parametros' && (
+            <div className="card">
+              <div className="card-header">
+                <h2>Parámetros de Nómina</h2>
+                <p className="description">Configura los valores que se usarán en el Excel generado. Los cambios se aplican automáticamente al generar la planilla.</p>
+              </div>
+              <div className="card-body">
+                {params === null ? (
+                  <p style={{color: 'var(--text-secondary)', padding: '1rem 0'}}>Cargando parámetros de la plantilla...</p>
+                ) : (
+                  <div className="params-content">
+                    <div className="params-group">
+                      <h3 className="params-group-title">Valor UVT</h3>
+                      <div className="params-uvt-row">
+                        <label className="label">VALOR UVT</label>
+                        <input
+                          type="number"
+                          className="params-input params-input-uvt"
+                          value={params.uvt}
+                          onChange={e => setParams(p => ({...p, uvt: Number(e.target.value)}))}
+                          min="0"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="params-group">
+                      <h3 className="params-group-title">Tabla de Retención</h3>
+                      <table className="params-table">
+                        <thead>
+                          <tr>
+                            <th>Valor 1</th>
+                            <th>Valor 2</th>
+                            <th>Valor 3</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {params.ret.map((row, i) => (
+                            <tr key={i}>
+                              <td><input type="number" className="params-input" value={row.desde}
+                                onChange={e => setParams(p => ({...p, ret: p.ret.map((r,j) => j===i ? {...r, desde: Number(e.target.value)} : r)}))}
+                                min="0" /></td>
+                              <td><input type="number" className="params-input" value={+(row.tarifa*100).toFixed(4)}
+                                onChange={e => setParams(p => ({...p, ret: p.ret.map((r,j) => j===i ? {...r, tarifa: Number(e.target.value)/100} : r)}))}
+                                min="0" max="100" step="0.01" /></td>
+                              <td><input type="number" className="params-input" value={row.descuento}
+                                onChange={e => setParams(p => ({...p, ret: p.ret.map((r,j) => j===i ? {...r, descuento: Number(e.target.value)} : r)}))}
+                                min="0" /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* ── Retención Adicional ─────────────────────────────── */}
+                    <div className="params-group">
+                      <div className="params-group-header">
+                        <h3 className="params-group-title">Retención Adicional</h3>
+                        <button
+                          className="rete-add-btn"
+                          onClick={() => setParams(p => ({
+                            ...p,
+                            reteAdic: [...(p.reteAdic ?? []), { empleado: '', nombre: '', retAdicional: 0 }]
+                          }))}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                          </svg>
+                          Agregar registro
+                        </button>
+                      </div>
+                      {params.reteAdic && params.reteAdic.length > 0 ? (
+                        <table className="params-table rete-table">
+                          <thead>
+                            <tr>
+                              <th>Empleado</th>
+                              <th>Nombre completo</th>
+                              <th>RET ADICIONAL</th>
+                              <th></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {params.reteAdic.map((row, i) => (
+                              <tr key={i}>
+                                <td>
+                                  <input
+                                    type="text"
+                                    className="params-input"
+                                    value={row.empleado}
+                                    onChange={e => setParams(p => ({
+                                      ...p,
+                                      reteAdic: p.reteAdic.map((r, j) => j === i ? {...r, empleado: e.target.value} : r)
+                                    }))}
+                                    placeholder="Cédula / Código"
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    type="text"
+                                    className="params-input"
+                                    value={row.nombre}
+                                    onChange={e => setParams(p => ({
+                                      ...p,
+                                      reteAdic: p.reteAdic.map((r, j) => j === i ? {...r, nombre: e.target.value} : r)
+                                    }))}
+                                    placeholder="Nombre completo"
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    type="number"
+                                    className="params-input"
+                                    value={row.retAdicional}
+                                    onChange={e => setParams(p => ({
+                                      ...p,
+                                      reteAdic: p.reteAdic.map((r, j) => j === i ? {...r, retAdicional: Number(e.target.value)} : r)
+                                    }))}
+                                    min="0"
+                                  />
+                                </td>
+                                <td>
+                                  <button
+                                    className="rete-del-btn"
+                                    onClick={() => setParams(p => ({
+                                      ...p,
+                                      reteAdic: p.reteAdic.filter((_, j) => j !== i)
+                                    }))}
+                                    title="Eliminar"
+                                  >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                                    </svg>
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <p className="rete-empty">Sin registros. Haz clic en "Agregar registro" para añadir uno.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
         </div>
       </main>
 
@@ -1673,61 +2801,7 @@ function App() {
         </div>
       </footer>
 
-      {modal && (
-        <div className="modal-overlay" onClick={() => setModal(null)}>
-          <div className={`modal-content ${modal.type}`} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon">
-              {modal.type === 'success' ? (
-                <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-              ) : (
-                <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" y1="8" x2="12" y2="12"/>
-                  <line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-              )}
-            </div>
-            <h3 className="modal-title">{modal.type === 'success' ? '¡Listo!' : 'Error'}</h3>
-            <p className="modal-message">{modal.message}</p>
-            {modal.type === 'success' && modal.blobs ? (
-              <div className="modal-downloads">
-                <button
-                  className="modal-download-btn primary"
-                  onClick={() => downloadBlob(modal.blobs.segSocial, 'Seguridad_Social.xlsx')}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                  </svg>
-                  Descargar Seguridad Social
-                </button>
-                <button
-                  className="modal-download-btn secondary"
-                  onClick={() => downloadBlob(modal.blobs.full, 'Validacion_Nomina.xlsx')}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                  </svg>
-                  Descargar el libro de validación completo
-                </button>
-                <button className="modal-button" onClick={() => setModal(null)}>Cerrar</button>
-              </div>
-            ) : (
-              <button className="modal-button" onClick={() => setModal(null)}>Cerrar</button>
-            )}
-            {modal.type === 'success' && !modal.blobs && (
-              <div className="modal-progress">
-                <div className="modal-progress-bar" onAnimationEnd={() => setModal(null)} />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+
     </div>
   )
 }
