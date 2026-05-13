@@ -1299,6 +1299,8 @@ function App() {
   const [isDraggingPlantilla, setIsDraggingPlantilla] = useState(false)
   const [fileNovedades, setFileNovedades] = useState(null)
   const [isDraggingNovedades, setIsDraggingNovedades] = useState(false)
+  const [fileNominaAnterior, setFileNominaAnterior] = useState(null)
+  const [isDraggingNominaAnterior, setIsDraggingNominaAnterior] = useState(false)
   const [isHelpExpanded, setIsHelpExpanded] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [modal, setModal] = useState(null)
@@ -1309,6 +1311,7 @@ function App() {
   const fileMaestroRef = useRef(null)
   const filePlantillaRef = useRef(null)
   const fileNovedadesRef = useRef(null)
+  const fileNominaAnteriorRef = useRef(null)
 
   // Función helper: extrae params desde un ArrayBuffer de plantilla
   const loadParamsFromBuffer = (buf) => {
@@ -1391,6 +1394,13 @@ function App() {
     handleFileNovedades(e.dataTransfer.files[0])
   }
 
+  const handleFileNominaAnterior = (f) => { if (validateExcel(f)) setFileNominaAnterior(f) }
+  const handleDropNominaAnterior = (e) => {
+    e.preventDefault()
+    setIsDraggingNominaAnterior(false)
+    handleFileNominaAnterior(e.dataTransfer.files[0])
+  }
+
   const removeFile = () => {
     setFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -1419,6 +1429,11 @@ function App() {
   const removeFileNovedades = () => {
     setFileNovedades(null)
     if (fileNovedadesRef.current) fileNovedadesRef.current.value = ''
+  }
+
+  const removeFileNominaAnterior = () => {
+    setFileNominaAnterior(null)
+    if (fileNominaAnteriorRef.current) fileNominaAnteriorRef.current.value = ''
   }
 
   const formatBytes = (bytes) => {
@@ -1914,6 +1929,98 @@ function App() {
           return buildMaestroRow(r, srcRow, idx + 1, strIdxMap)
         }).join('')
         files[mpPath] = strToU8(rebuildSheetData(strFromU8(files[mpPath]), mpRowsXml, 1))
+
+        // ── Procesar validacion aux alimentacion (2) ─────────────────────────
+        // Construir mapa empCode → concepto (111500 o 111501) desde nómina mes anterior
+        const auxAlimPrevMap = new Map()
+        if (fileNominaAnterior) {
+          const prevBuf = await fileNominaAnterior.arrayBuffer()
+          const prevWb = new ExcelJS.Workbook()
+          await prevWb.xlsx.load(prevBuf)
+          const prevSheet = prevWb.worksheets[0]
+          if (prevSheet) {
+            prevSheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
+              if (rowNum < 2) return
+              const emp = String(getCellValue(row.getCell(1)) ?? '').trim()
+              const conc = String(getCellValue(row.getCell(3)) ?? '').trim()
+              if (emp && (conc === '111501' || conc === '111500')) {
+                auxAlimPrevMap.set(emp, conc)
+              }
+            })
+          }
+        }
+        const auxAlimPath = resolveSheetZipPath(workbookXml, relsXml, 'validacion aux alimentacion (2)')
+        if (files[auxAlimPath]) {
+          const auxAlimRowsXml = maestroRows.map((srcRow, idx) => {
+            const r = idx + 5 // datos desde fila 5
+            let c = ''
+            // A: CODIGO EMPLEADO (col B del maestro = col 2)
+            const empRaw = getCellValue(srcRow.getCell(2))
+            const empStr = (empRaw == null ? '' : String(empRaw)).trim()
+            const empIsNum = empStr !== '' && /^\d+$/.test(empStr)
+            if (empIsNum) {
+              c += `<c r="A${r}" s="222"><v>${empStr}</v></c>`
+            } else if (empStr) {
+              const si = strIdxMap.get(empStr)
+              if (si !== undefined) c += `<c r="A${r}" s="222" t="s"><v>${si}</v></c>`
+            }
+            // B: DOCUMENTO (col E = col 5)
+            const docRaw = getCellValue(srcRow.getCell(5))
+            const docStr = (docRaw == null ? '' : String(docRaw)).trim()
+            if (docStr) {
+              const si = strIdxMap.get(docStr)
+              if (si !== undefined) c += `<c r="B${r}" s="223" t="s"><v>${si}</v></c>`
+              else c += `<c r="B${r}" s="223" t="inlineStr"><is><t>${escapeXml(docStr)}</t></is></c>`
+            }
+            // C: NOMBRE (col F = col 6)
+            const nomRaw = getCellValue(srcRow.getCell(6))
+            const nomStr = (nomRaw == null ? '' : String(nomRaw)).trim()
+            if (nomStr) {
+              const si = strIdxMap.get(nomStr)
+              if (si !== undefined) c += `<c r="C${r}" s="223" t="s"><v>${si}</v></c>`
+              else c += `<c r="C${r}" s="223" t="inlineStr"><is><t>${escapeXml(nomStr)}</t></is></c>`
+            }
+            // D: CLASE DE SALARIO (col AG = col 33)
+            const claseRaw = getCellValue(srcRow.getCell(33))
+            const claseStr = (claseRaw == null ? '' : String(claseRaw)).trim()
+            if (claseStr) {
+              const si = strIdxMap.get(claseStr)
+              if (si !== undefined) c += `<c r="D${r}" s="223" t="s"><v>${si}</v></c>`
+              else c += `<c r="D${r}" s="223" t="inlineStr"><is><t>${escapeXml(claseStr)}</t></is></c>`
+            }
+            // E: SUELDO (col AH = col 34)
+            const sueldoRaw = getCellValue(srcRow.getCell(34))
+            const sueldoNum = typeof sueldoRaw === 'number' ? sueldoRaw : Number(sueldoRaw)
+            if (sueldoRaw != null && String(sueldoRaw).trim() !== '' && !isNaN(sueldoNum)) {
+              c += `<c r="E${r}" s="224"><v>${sueldoNum}</v></c>`
+            }
+            // F: =+E{r}/$F$2
+            c += `<c r="F${r}" s="225"><f>+E${r}/$F$2</f></c>`
+            // G: =IF(F{r}>=$H$1,"111501","111500")
+            c += `<c r="G${r}" s="209" t="str"><f>IF(F${r}&gt;=$H$1,"111501","111500")</f></c>`
+            // H: concepto mes anterior si se subió el archivo y se encontró; si no, VLOOKUP
+            const prevConc = auxAlimPrevMap.get(empStr)
+            if (fileNominaAnterior && prevConc) {
+              const si = strIdxMap.get(prevConc)
+              if (si !== undefined) c += `<c r="H${r}" s="211" t="s"><v>${si}</v></c>`
+              else c += `<c r="H${r}" s="211" t="inlineStr"><is><t>${escapeXml(prevConc)}</t></is></c>`
+            } else if (!fileNominaAnterior) {
+              c += `<c r="H${r}" s="211" t="str"><f>VLOOKUP(A${r},'[5]a dic va'!$A:$C,3,0)</f></c>`
+            }
+            // I: =H{r}=G{r}
+            c += `<c r="I${r}" s="211"><f>H${r}=G${r}</f></c>`
+            return `<row r="${r}" spans="1:15" x14ac:dyDescent="0.3">${c}</row>`
+          }).join('')
+          let auxAlimXml = strFromU8(files[auxAlimPath])
+          // Inyectar/reemplazar F2 con fórmula =Parametros!D13
+          const f2New = '<c r="F2"><f>Parametros!D13</f></c>'
+          if (/<c r="F2"[^>]*>[\s\S]*?<\/c>|<c r="F2"[^/]*\/>/.test(auxAlimXml)) {
+            auxAlimXml = auxAlimXml.replace(/<c r="F2"[^>]*>[\s\S]*?<\/c>|<c r="F2"[^/]*\/>/, f2New)
+          } else {
+            auxAlimXml = auxAlimXml.replace(/(<row r="2"[^>]*>)([\s\S]*?)(<\/row>)/, (_, open, cells, close) => open + cells + f2New + close)
+          }
+          files[auxAlimPath] = strToU8(rebuildSheetData(auxAlimXml, auxAlimRowsXml, 4))
+        }
       }
 
       // ── Procesar Validacion novedades ────────────────────────────────────────
@@ -2428,6 +2535,69 @@ function App() {
                   )}
                 </div>
 
+                {/* Nómina mes anterior */}
+                <div className="form-group">
+                  <label className="label">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    Nómina mes anterior (.xlsx)
+                    <span className="drop-zone-hint" style={{display:'block', fontWeight:'normal', fontSize:'0.8rem', marginTop:'4px'}}>Para determinar el concepto de auxilio de alimentación usado el mes pasado por cada persona.</span>
+                  </label>
+                  <input
+                    ref={fileNominaAnteriorRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    className="file-input"
+                    id="file-upload-nomina-anterior"
+                    onChange={(e) => handleFileNominaAnterior(e.target.files[0])}
+                  />
+                  {!fileNominaAnterior ? (
+                    <label
+                      htmlFor="file-upload-nomina-anterior"
+                      className={`drop-zone ${isDraggingNominaAnterior ? 'drag-active' : ''}`}
+                      onDragOver={(e) => { e.preventDefault(); setIsDraggingNominaAnterior(true) }}
+                      onDragLeave={() => setIsDraggingNominaAnterior(false)}
+                      onDrop={handleDropNominaAnterior}
+                    >
+                      <div className="drop-zone-content">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="17 8 12 3 7 8"/>
+                          <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <div className="drop-zone-text">
+                          <span className="drop-zone-title">Arrastra tu archivo aquí</span>
+                          <span className="drop-zone-subtitle">o haz clic para seleccionarlo</span>
+                        </div>
+                        <span className="drop-zone-hint">Misma estructura que la nómina actual (opcional)</span>
+                      </div>
+                    </label>
+                  ) : (
+                    <div className="drop-zone has-file">
+                      <div className="file-preview">
+                        <div className="file-icon">
+                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                          </svg>
+                        </div>
+                        <div className="file-details">
+                          <span className="file-name">{fileNominaAnterior.name}</span>
+                          <span className="file-size">{formatBytes(fileNominaAnterior.size)}</span>
+                        </div>
+                        <button className="btn-remove" onClick={removeFileNominaAnterior} type="button" aria-label="Eliminar archivo">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="form-group">
                   <label className="label">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2553,7 +2723,7 @@ function App() {
                 <button
                   className="btn-primary"
                   onClick={processFile}
-                  disabled={(!file && !fileNomina && !fileMaestro && !filePlantilla && !fileNovedades) || isProcessing}
+                  disabled={(!file && !fileNomina && !fileMaestro && !filePlantilla && !fileNovedades && !fileNominaAnterior) || isProcessing}
                 >
                   {isProcessing ? (
                     <>
