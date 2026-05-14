@@ -199,7 +199,7 @@ body {
 }
 
 .help-content.expanded {
-  max-height: 500px;
+  max-height: 1400px;
   padding-bottom: 1.5rem;
 }
 
@@ -240,6 +240,18 @@ body {
 
 .help-content.expanded .help-list li:nth-child(4) {
   transition-delay: 0.4s;
+}
+
+.help-content.expanded .help-list li:nth-child(5) {
+  transition-delay: 0.5s;
+}
+
+.help-content.expanded .help-list li:nth-child(6) {
+  transition-delay: 0.6s;
+}
+
+.help-content.expanded .help-list li:nth-child(7) {
+  transition-delay: 0.7s;
 }
 
 .help-list .step-number {

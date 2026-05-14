@@ -2308,33 +2308,50 @@ function App() {
                 <li>
                   <span className="step-number">1</span>
                   <div>
-                    <strong>Sube el archivo IBC</strong>
-                    <p>El Excel de IBC del mes anterior.</p>
+                    <strong>Plantilla base (opcional)</strong>
+                    <p>Si tienes una plantilla personalizada, súbela aquí. Si no, la app usa la plantilla interna por defecto.</p>
                   </div>
                 </li>
                 <li>
                   <span className="step-number">2</span>
                   <div>
-                    <strong>Sube la nómina del mes</strong>
-                    <p>El Excel de nómina detallada del mes actual.</p>
+                    <strong>IBC Mes Anterior</strong>
+                    <p>El Excel de IBC del mes anterior. Debe contener la hoja <em>Sheet1</em>. La app mapea más de 80 columnas y construye el pivote de bases IBC en la hoja <em>Planilla Mes anterior</em>.</p>
                   </div>
                 </li>
                 <li>
                   <span className="step-number">3</span>
                   <div>
-                    <strong>Sube el Maestro Personal</strong>
-                    <p>El Excel de Maestro Personal actualizado.</p>
+                    <strong>Archivo Nómina</strong>
+                    <p>El Excel de nómina detallada del mes actual. Se usa para llenar <em>Detallado Mes</em>, <em>rev incapacidades</em> (conceptos 001150 / 001151 / 001177 / 001178) y <em>Validacion novedades</em>.</p>
                   </div>
                 </li>
                 <li>
                   <span className="step-number">4</span>
                   <div>
-                    <strong>Genera y descarga</strong>
-                    <p>Haz clic en <em>Generar Planilla de Validación</em>. Aparecerán dos opciones:</p>
-                    <ul style={{marginTop: '6px', paddingLeft: '16px', lineHeight: '1.8'}}>
-                      <li><strong>Libro completo</strong> — la plantilla entera con todas las hojas y los datos del mes cargados.</li>
-                      <li><strong>Solo Seguridad Social</strong> — únicamente esa hoja con los valores ya calculados, lista para enviar o archivar.</li>
-                    </ul>
+                    <strong>Nómina mes anterior (opcional)</strong>
+                    <p>La nómina del mes pasado con la misma estructura. Se usa para determinar qué concepto de auxilio de alimentación (111500 ó 111501) tenía cada empleado el mes anterior y volcar ese dato en la columna H de <em>validacion aux alimentacion (2)</em>. Si no se sube, esa columna queda con una fórmula BUSCARV.</p>
+                  </div>
+                </li>
+                <li>
+                  <span className="step-number">5</span>
+                  <div>
+                    <strong>Maestro Personal</strong>
+                    <p>El Excel de Maestro Personal actualizado. Se toman los empleados con estado <em>Activos</em>, <em>Ausencia</em> o <em>Vacaciones</em> (desde la fila 6). Sus datos llenan la hoja <em>Maestro Personal</em>, actualizan la columna A de <em>Seguridad Social</em> y construyen la hoja <em>validacion aux alimentacion (2)</em>.</p>
+                  </div>
+                </li>
+                <li>
+                  <span className="step-number">6</span>
+                  <div>
+                    <strong>Novedades del cliente (opcional)</strong>
+                    <p>El Excel de novedades exportado desde el sistema del cliente (<em>All Entitlements</em>). Se mapea a la hoja <em>Novedades</em> y es la fuente del BUSCARV en la columna K de <em>Validacion novedades</em>.</p>
+                  </div>
+                </li>
+                <li>
+                  <span className="step-number">7</span>
+                  <div>
+                    <strong>Generar y descargar</strong>
+                    <p>Haz clic en <strong>Generar</strong>. Se descargará el <strong>Libro completo</strong> — la plantilla entera con todas las hojas y los datos del mes cargados, lista para abrir en Excel.</p>
                   </div>
                 </li>
               </ol>
@@ -2761,28 +2778,7 @@ function App() {
                         </div>
                         {modal.blobs && (
                           <div className="result-downloads">
-                            <button
-                              className="result-download-btn primary"
-                              onClick={() => downloadBlob(modal.blobs.segSocial, 'Seguridad_Social.xlsx')}
-                            >
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                              </svg>
-                              Seguridad Social
-                            </button>
-                            <button
-                              className="result-download-btn"
-                              onClick={() => downloadBlob(modal.blobs.retencion, 'Retencion.xlsx')}
-                            >
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                              </svg>
-                              Retención
-                            </button>
+                            {/* Seguridad Social y Retención ocultos temporalmente */}
                             <button
                               className="result-download-btn"
                               onClick={() => downloadBlob(modal.blobs.full, 'Validacion_Nomina.xlsx')}
