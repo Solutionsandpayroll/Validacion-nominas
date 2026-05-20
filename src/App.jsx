@@ -668,6 +668,31 @@ function buildValNovedadesRow(r, empleado, nombre, concepto, descConcepto, canti
 }
 
 // ─── Actualiza los parámetros configurables en la hoja "Parametros" ─────────
+/** Fuerza col C = "Incapacidad" en filas de "Conceptos" donde col A es 001150, 001151 o 001162 */
+function patchConceptosSheet(sheetXml, ssArr) {
+  const TARGET_CODES = new Set(['001150', '001151', '001162'])
+  return sheetXml.replace(/<row r="(\d+)"([^>]*)(?<!\/)(>[\s\S]*?)<\/row>/g,
+    (match, rStr, attrs, rest) => {
+      const r = parseInt(rStr)
+      if (r < 2) return match
+      const inner = rest.slice(1)
+      // Leer valor de col A — soporta shared string (t="s"), inlineStr y valor directo
+      const aCell = inner.match(/<c r="A\d+"([^>]*)>(?:<f>[^<]*<\/f>)?(?:<v>([^<]*)<\/v>|<is><t>([^<]*)<\/t><\/is>)/)
+      if (!aCell) return match
+      const cellAttrs = aCell[1] ?? ''
+      const rawVal = aCell[2] ?? aCell[3] ?? ''
+      const isShared = /\bt="s"/.test(cellAttrs)
+      const aVal = (isShared && ssArr ? (ssArr[parseInt(rawVal)] ?? '') : rawVal).trim()
+      if (!TARGET_CODES.has(aVal)) return match
+      // Reemplazar o insertar C con inlineStr "Incapacidad"
+      const cCell = `<c r="C${r}" t="inlineStr"><is><t>Incapacidad</t></is></c>`
+      let newInner = inner.replace(/<c r="C\d+"[^>]*(?<!\/)(>[\s\S]*?<\/c>|\/>)/g, '')
+      const inserted = newInner.replace(/(<c r="D\d+")/, `${cCell}$1`)
+      newInner = inserted === newInner ? newInner + cCell : inserted
+      return `<row r="${r}"${attrs}>${newInner}</row>`
+    })
+}
+
 function patchParametrosSheet(sheetXml, params) {
   const patchCellV = (xml, cellRef, newVal) =>
     xml.replace(
@@ -824,6 +849,43 @@ function patchSheetColA(sheetXml, empleadoCodes, firstRow, lastTplRow, aStyle) {
 /** Wrapper de patchSheetColA para "Seguridad Social" (filas 3-361, s="81") */
 function patchSegSocialColA(sheetXml, empleadoCodes) {
   return patchSheetColA(sheetXml, empleadoCodes, 3, 361, '81')
+}
+
+/** Inyecta/reemplaza la fórmula de col Z en todas las filas >= 4 de "Devengos" (hasta firstRow + count - 1) */
+function patchDevengosColZ(sheetXml, count) {
+  const lastRow = 4 + count - 1
+  return sheetXml.replace(/<row r="(\d+)"([^>]*)(?<!\/)(>[\s\S]*?)<\/row>/g,
+    (match, rStr, attrs, rest) => {
+      const r = parseInt(rStr)
+      if (r < 4 || r > lastRow) return match
+      const formula = `+SUMIF('Validacion novedades'!A:A,CONCATENATE(A${r},$Z$2),'Validacion novedades'!F:F)`
+      const zCell = `<c r="Z${r}"><f>${formula}</f></c>`
+      const inner = rest.slice(1)
+        .replace(/<c r="Z\d+"[^>]*(?<!\/)(>[\s\S]*?<\/c>|\/>)/g, '')
+      // Insertar antes de la primera celda de col AA en adelante, o al final
+      const inserted = inner.replace(/(<c r="A[A-Z]\d+")/, `${zCell}$1`)
+      const finalInner = inserted === inner ? inner + zCell : inserted
+      return `<row r="${r}"${attrs}>${finalInner}</row>`
+    })
+}
+
+/** Inyecta/reemplaza la fórmula de col G en todas las filas >= 3 de "Seguridad Social" (hasta firstRow + count - 1) */
+function patchSegSocialColG(sheetXml, count) {
+  const lastRow = 3 + count - 1
+  return sheetXml.replace(/<row r="(\d+)"([^>]*)(?<!\/)(>[\s\S]*?)<\/row>/g,
+    (match, rStr, attrs, rest) => {
+      const r = parseInt(rStr)
+      if (r < 3 || r > lastRow) return match
+      const formula = `+IF(Parametros!$D$5="HORAS",TRUNC(SUMIF('Detallado Mes'!J:J,CONCATENATE('Seguridad Social'!A${r},"Incapacidad"),'Detallado Mes'!F:F)/7.3333,0),SUMIF('Detallado Mes'!J:J,CONCATENATE('Seguridad Social'!A${r},"Incapacidad"),'Detallado Mes'!F:F))`
+      const gCell = `<c r="G${r}"><f>${formula}</f></c>`
+      // Quitar celda G existente (con contenido o self-closing)
+      const inner = rest.slice(1, rest.length) // quita el '>' inicial
+        .replace(/<c r="G\d+"[^>]*(?<!\/)(>[\s\S]*?<\/c>|\/>)/g, '')
+      // Insertar gCell antes de la primera celda de col H en adelante, o al final
+      const insertedInner = inner.replace(/(<c r="[H-Z]\d+")/, `${gCell}$1`)
+      const finalInner = insertedInner === inner ? inner + gCell : insertedInner
+      return `<row r="${r}"${attrs}>${finalInner}</row>`
+    })
 }
 
 // ─── Extrae hoja "Seguridad Social" como workbook independiente ──────────────
@@ -2156,13 +2218,13 @@ function App() {
 
         const ssPath = resolveSheetZipPath(workbookXml, relsXml, 'Seguridad Social')
         if (files[ssPath]) {
-          files[ssPath] = strToU8(patchSegSocialColA(strFromU8(files[ssPath]), empCodes))
+          files[ssPath] = strToU8(patchSegSocialColG(patchSegSocialColA(strFromU8(files[ssPath]), empCodes), empCodes.length))
         }
 
         const devPath = resolveSheetZipPath(workbookXml, relsXml, 'Devengos')
         if (files[devPath]) {
-          // Devengos: datos desde fila 4 hasta 362, col A s="81"
-          files[devPath] = strToU8(patchSheetColA(strFromU8(files[devPath]), empCodes, 4, 362, '81'))
+          // Devengos: datos desde fila 4 hasta 362, col A s="81"; col Z con SUMAR.SI
+          files[devPath] = strToU8(patchDevengosColZ(patchSheetColA(strFromU8(files[devPath]), empCodes, 4, 362, '81'), empCodes.length))
         }
 
         const retPath = resolveSheetZipPath(workbookXml, relsXml, 'Retencion')
@@ -2188,6 +2250,13 @@ function App() {
       const paramPath = resolveSheetZipPath(workbookXml, relsXml, 'Parametros')
       if (paramPath && files[paramPath]) {
         files[paramPath] = strToU8(patchParametrosSheet(strFromU8(files[paramPath]), activeParams))
+      }
+
+      // ── Parchar hoja "Conceptos": col C = "Incapacidad" para códigos 001150/001151/001162 ──
+      const conceptosPath = resolveSheetZipPath(workbookXml, relsXml, 'Conceptos')
+      if (conceptosPath && files[conceptosPath]) {
+        const ssArr = buildSsReverseArray(strFromU8(files['xl/sharedStrings.xml']))
+        files[conceptosPath] = strToU8(patchConceptosSheet(strFromU8(files[conceptosPath]), ssArr))
       }
 
       // ── Retención adicional ──────────────────────────────────────────────────
